@@ -7,6 +7,12 @@ config DRAM_SUN20I_D1
 
 if DRAM_SUN20I_D1
 
+config SPL_DRAM_SUNXI_DEBUG
+	bool "Verbose D1 SPL DRAM initialization"
+	depends on SPL
+	help
+	  Print DRAM initialization and memory test details in SPL.
+
 config DRAM_SUNXI_ODT_EN
 	hex "DRAM ODT EN parameter"
 	help
