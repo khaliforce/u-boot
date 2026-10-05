@@ -11,6 +11,9 @@
 #include <reset.h>
 #include <asm/io.h>
 #include <clk/sunxi.h>
+#ifdef CONFIG_TARGET_SUN20I_D1
+#include <clk/sunxi-d1.h>
+#endif
 #include <dm/device-internal.h>
 #include <linux/bitops.h>
 #include <linux/log2.h>
@@ -78,6 +81,9 @@ static int sunxi_clk_bind(struct udevice *dev)
 
 static int sunxi_clk_probe(struct udevice *dev)
 {
+#ifdef CONFIG_TARGET_SUN20I_D1
+	struct ccu_plat *plat = dev_get_plat(dev);
+#endif
 	struct clk_bulk clk_bulk;
 	struct reset_ctl_bulk rst_bulk;
 	int ret;
@@ -89,6 +95,11 @@ static int sunxi_clk_probe(struct udevice *dev)
 	ret = reset_get_bulk(dev, &rst_bulk);
 	if (!ret)
 		reset_deassert_bulk(&rst_bulk);
+
+#ifdef CONFIG_TARGET_SUN20I_D1
+	if (plat->desc == &d1_ccu_desc)
+		sunxi_d1_clock_init(plat->base);
+#endif
 
 	return 0;
 }
