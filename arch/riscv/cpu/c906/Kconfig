@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0+
+
+config THEAD_C906
+	bool
+	select SYS_CACHE_SHIFT_6
