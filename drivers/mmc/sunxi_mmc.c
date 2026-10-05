@@ -22,8 +22,21 @@
 #include <reset.h>
 #include <asm/gpio.h>
 #include <asm/io.h>
+#ifdef CONFIG_TARGET_SUN20I_D1
+#include <clk/sunxi-d1.h>
+
+#define SUNXI_MMC0_BASE		0x04020000
+#define CCM_MMC_CTRL_M(x)	((x) - 1)
+#define CCM_MMC_CTRL_N(x)	((x) << 8)
+#define CCM_MMC_CTRL_OSCM24	0
+#define CCM_MMC_CTRL_PLL6	BIT(24)
+#define CCM_MMC_CTRL_ENABLE	BIT(31)
+#define CCM_MMC_CTRL_OCLK_DLY(x)	((void)(x), 0)
+#define CCM_MMC_CTRL_SCLK_DLY(x)	((void)(x), 0)
+#else
 #include <asm/arch/clock.h>
 #include <asm/arch/cpu.h>
+#endif
 #if !CONFIG_IS_ENABLED(DM_MMC)
 #include <asm/arch/mmc.h>
 #endif
@@ -90,7 +103,11 @@ static int mmc_set_mod_clk(struct sunxi_mmc_priv *priv, unsigned int hz)
 		 * pretend it's always PLL6 without a post divider here.
 		 */
 		pll = CCM_MMC_CTRL_PLL6;
+#ifdef CONFIG_TARGET_SUN20I_D1
+		pll_hz = sunxi_d1_get_pll6();
+#else
 		pll_hz = clock_get_pll6();
+#endif
 #endif
 		/*
 		 * On the D1/R528/T113 mux source 1 refers to PLL_PERIPH0(1x),
