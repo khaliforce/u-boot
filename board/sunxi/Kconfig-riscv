@@ -21,4 +21,31 @@ config TEXT_BASE
 config SYS_LOAD_ADDR
 	default 0x42000000
 
+config SUNXI_GEN_NCAT2
+	bool
+
+config SUNXI_NEW_PINCTRL
+	bool
+
+config SUNXI_SRAM_ADDRESS
+	hex
+	default 0x20000
+
+config SYS_CLK_FREQ
+	default 1008000000
+
+config DRAM_CLK
+	int "D1 DRAM clock in MHz"
+	default 792
+	help
+	  Set the DRAM clock for the fitted memory chips.
+	  Use the value tested for the board.
+
+config DRAM_ZQ
+	int "D1 DRAM ZQ calibration"
+	default 8092667
+	help
+	  Set the ZQ calibration value for the fitted memory chips.
+	  Use the value tested for the board.
+
 endif
