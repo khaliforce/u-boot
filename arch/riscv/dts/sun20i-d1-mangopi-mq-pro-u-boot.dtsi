@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/* Copyright (C) 2026 khaliforce <kforce@gmail.com> */
+
+#include "sunxi-u-boot.dtsi"
+
+/* Linux uses a separate DT to initialize Wi-Fi. */
+&mmc1 {
+	status = "disabled";
+};

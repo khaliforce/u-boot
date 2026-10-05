@@ -3,6 +3,12 @@
 
 if TARGET_SUN20I_D1
 
+config MANGOPI_MQ_PRO
+	bool "MangoPi MQ Pro"
+	help
+	  Select the MangoPi MQ Pro board with an Allwinner D1 CPU.
+	  Use the board DRAM settings and firmware device tree.
+
 config SYS_CPU
 	default "c906"
 
