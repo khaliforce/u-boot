@@ -9,4 +9,8 @@
 
 #define CFG_SYS_SDRAM_BASE	0x40000000
 
+#ifdef CONFIG_MANGOPI_MQ_PRO
+#include <configs/mangopi_mq_pro.h>
+#endif
+
 #endif

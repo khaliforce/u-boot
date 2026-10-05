@@ -641,3 +641,13 @@ M:	Yu-Tung Chang <mtwget@gmail.com>
 S:	Maintained
 F:	configs/zeropi_defconfig
 F:	arch/arm/dts/sun8i-h3-zeropi.dts
+
+MANGOPI MQ PRO
+M:	khaliforce <kforce@gmail.com>
+S:	Maintained
+F:	configs/mangopi_mq_pro_defconfig
+F:	include/configs/mangopi_mq_pro.h
+F:	include/configs/sun20i.h
+F:	include/clk/sunxi-d1.h
+F:	arch/riscv/dts/sun20i-d1-mangopi-mq-pro-u-boot.dtsi
+F:	doc/board/allwinner/mangopi-mq-pro.rst
