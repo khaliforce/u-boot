@@ -57,6 +57,16 @@ config TARGET_STARFIVE_VISIONFIVE2
 	bool "Support StarFive VisionFive2 Board"
 	select BOARD_LATE_INIT
 
+config TARGET_SUN20I_D1
+	bool "Support Allwinner D1 boards"
+	select DM
+	select THEAD_C906
+	select GENERIC_RISCV
+	select SUPPORT_SPL
+	help
+	  Build for Allwinner D1 boards with a T-Head C906 CPU.
+	  Use a board defconfig to select DRAM and peripheral settings.
+
 config TARGET_TH1520_LPI4A
 	bool "Support Sipeed's TH1520 Lichee PI 4A Board"
 	select SYS_CACHE_SHIFT_6
@@ -125,6 +135,7 @@ source "board/sophgo/milkv_duo_256m/Kconfig"
 source "board/sophgo/licheerv_nano/Kconfig"
 source "board/spacemit/k1/Kconfig"
 source "board/starfive/visionfive2/Kconfig"
+source "board/sunxi/Kconfig-riscv"
 source "board/thead/th1520_lpi4a/Kconfig"
 source "board/xilinx/mbv/Kconfig"
 
@@ -146,6 +157,7 @@ source "arch/riscv/cpu/th1520/Kconfig"
 
 choice
 	prompt "Base ISA"
+	default ARCH_RV64I if TARGET_SUN20I_D1
 	default ARCH_RV32I
 
 config ARCH_RV32I

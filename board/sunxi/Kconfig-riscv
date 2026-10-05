@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-2.0+
+# Copyright (C) 2026 khaliforce <kforce@gmail.com>
+
+if TARGET_SUN20I_D1
+
+config SYS_CPU
+	default "c906"
+
+config SYS_BOARD
+	default "sunxi"
+
+config SYS_SOC
+	default "sunxi"
+
+config SYS_CONFIG_NAME
+	default "sun20i"
+
+config TEXT_BASE
+	default 0x4a000000
+
+config SYS_LOAD_ADDR
+	default 0x42000000
+
+endif
