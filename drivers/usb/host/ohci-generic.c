@@ -111,5 +111,5 @@ U_BOOT_DRIVER(ohci_generic) = {
 	.ops	= &ohci_usb_ops,
 	.priv_auto	= sizeof(struct generic_ohci),
 	/* Stop HCCA DMA before Linux reuses the controller memory. */
-	.flags	= DM_FLAG_ALLOC_PRIV_DMA | DM_FLAG_OS_PREPARE,
+	.flags	= DM_FLAG_ALLOC_PRIV_DMA | DM_FLAG_ACTIVE_DMA,
 };
