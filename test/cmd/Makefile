@@ -13,6 +13,7 @@ endif
 obj-$(CONFIG_HUSH_PARSER) += exit.o
 obj-$(CONFIG_X86) += cpuid.o msr.o
 obj-$(CONFIG_CMD_ADDRMAP) += addrmap.o
+obj-$(CONFIG_CMD_BINOP) += binop.o
 ifdef CONFIG_CONSOLE_RECORD
 obj-$(CONFIG_CMD_ACPI) += acpi.o
 endif
@@ -42,6 +43,9 @@ obj-$(CONFIG_CMD_PWM) += pwm.o
 obj-$(CONFIG_CMD_READ) += rw.o
 obj-$(CONFIG_CMD_SETEXPR) += setexpr.o
 obj-$(CONFIG_CMD_TEMPERATURE) += temperature.o
+ifeq ($(CONFIG_CMD_WDT)$(CONFIG_WDT_GPIO)$(CONFIG_WDT_SANDBOX),yyy)
+obj-y += wdt.o
+endif
 ifdef CONFIG_NET_LEGACY
 obj-$(CONFIG_CMD_WGET) += wget.o
 endif

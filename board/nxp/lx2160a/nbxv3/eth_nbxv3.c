@@ -34,6 +34,9 @@ void reset_phy(void)
 	 */
 	nbxv3_carrier_env_init();
 
+	/* Then SerDes 1, from ${hwconfig} or else from ${carrier} */
+	nbxv3_serdes1_apply();
+
 	if (IS_ENABLED(CONFIG_FSL_MC_ENET))
 		mc_env_boot();
 }

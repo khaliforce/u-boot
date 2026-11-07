@@ -19,6 +19,7 @@ DECLARE_GLOBAL_DATA_PTR;
 #define PERIPH_RESET_VALUE		0x1e8u
 
 static unsigned char mac_addr[6];
+static bool mac_addr_valid;
 
 #if defined(CONFIG_MULTI_DTB_FIT)
 int board_fit_config_name_match(const char *name)
@@ -114,7 +115,10 @@ int board_late_init(void)
 {
 	u32 ret;
 	int node;
+	int idx;
 	u8 device_serial_number[16] = {0};
+	char serialstring[33], designid[33];
+	u16 designver, designbacklevel;
 	void *blob = (void *)gd->fdt_blob;
 	struct udevice *dev;
 	struct mpfs_sys_serv *sys_serv_priv;
@@ -140,9 +144,32 @@ int board_late_init(void)
 
 	ret = mpfs_syscontroller_read_sernum(sys_serv_priv, device_serial_number);
 	if (ret) {
-		printf("Cannot read device serial number\n");
+		printf("Warning: Cannot read device serial number\n");
+		goto out;
+	}
+
+	/* Store design info and serial number in environment */
+	memset(designid, 0, sizeof(designid));
+	memset(serialstring, 0, sizeof(serialstring));
+
+	ret = mpfs_syscontroller_read_design_info(sys_serv_priv, designid,
+						  &designver, &designbacklevel);
+	if (ret) {
+		printf("Cannot read device design information\n");
 		return -EINVAL;
 	}
+
+	for (idx = 0; idx < 16; idx++)
+		sprintf(&serialstring[2*idx], "%02x", device_serial_number[idx]);
+
+	env_set("serial_number", serialstring);
+	env_set("design_id", designid);
+	env_set_ulong("design_ver", designver);
+	env_set_ulong("design_backlevel", designbacklevel);
+
+	printf("FPGA Design name: %s\n", designid);
+	printf("FPGA Serial: %s\n", serialstring);
+	printf("Design version number %d (backlevel %d)\n", designver, designbacklevel);
 
 	/* Update MAC address with device serial number */
 	mac_addr[0] = 0x00;
@@ -172,6 +199,9 @@ int board_late_init(void)
 		}
 	}
 
+	mac_addr_valid = true;
+
+out:
 	mpfs_syscontroller_process_dtbo(sys_serv_priv);
 
 	return 0;
@@ -181,6 +211,9 @@ int ft_board_setup(void *blob, struct bd_info *bd)
 {
 	u32 ret;
 	int node;
+
+	if (!mac_addr_valid)
+		return 0;
 
 	node = fdt_path_offset(blob, "/soc/ethernet@20110000");
 	if (node >= 0) {
