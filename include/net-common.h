@@ -362,6 +362,13 @@ struct ethernet_hdr {
 /* Ethernet header size */
 #define ETHER_HDR_SIZE	(sizeof(struct ethernet_hdr))
 
+/* Set Ethernet header; returns the size of the header */
+int net_set_ether(uchar *xet, const uchar *dest_ethaddr, uint prot);
+
+/* Set IPv4 and UDP headers */
+void net_set_udp_header(uchar *pkt, struct in_addr dest, int dport,
+			int sport, int len);
+
 /**
  * net_random_ethaddr - Generate software assigned random Ethernet address
  * @addr: Pointer to a six-byte array containing the Ethernet address
@@ -496,15 +503,15 @@ int net_loop(enum proto_t protocol);
 /**
  * dhcp_run() - Run DHCP on the current ethernet device
  *
- * This sets the autoload variable, then puts it back to similar to its original
- * state (y, n or unset).
+ * This temporarily sets autoload and restores its exact original value,
+ * including NFS and an unset variable.
  *
  * @addr: Address to load the file into (0 if @autoload is false)
  * @fname: Filename of file to load (NULL if @autoload is false or to use the
  * default filename)
  * @autoload: true to load the file, false to just get the network IP
- * @return 0 if OK, -EINVAL if the environment failed, -ENOENT if ant file was
- * not found
+ * Return: 0 if OK, -ENOMEM on allocation failure, -EINVAL if updating the
+ * environment failed, -ENOENT if DHCP or the download failed
  */
 int dhcp_run(ulong addr, const char *fname, bool autoload);
 

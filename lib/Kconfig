@@ -205,6 +205,10 @@ config VPL_STRTO
 config IMAGE_SPARSE
 	bool
 
+config SPL_IMAGE_SPARSE
+	bool
+	depends on SPL_SYS_MALLOC && !SPL_SYS_MALLOC_SIMPLE
+
 config IMAGE_SPARSE_FILLBUF_SIZE
 	hex "Android sparse image CHUNK_TYPE_FILL buffer size"
 	default 0x80000
@@ -212,6 +216,15 @@ config IMAGE_SPARSE_FILLBUF_SIZE
 	help
 	  Set the size of the fill buffer used when processing CHUNK_TYPE_FILL
 	  chunks.
+
+config SPL_IMAGE_SPARSE_FILLBUF_SIZE
+	hex "Android sparse image fill buffer size in SPL"
+	default 0x10000
+	depends on SPL_IMAGE_SPARSE
+	help
+	  Set the size of the fill buffer used when processing CHUNK_TYPE_FILL
+	  chunks in SPL. A smaller default limits transient heap use in the
+	  size-constrained SPL phase.
 
 config USE_PRIVATE_LIBGCC
 	bool "Use private libgcc"
@@ -307,6 +320,50 @@ config REGEX
 	  SLRE (Super Light Regular Expression) library, which adds
 	  regex support to some commands, for example "env grep" and
 	  "setexpr".
+
+config LIB_QRCODE
+	bool "Enable QR code generator library"
+	help
+	  Enables the Nayuki QR Code generator library (qrcodegen).
+	  This provides functions to encode arbitrary text or binary
+	  data into a QR Code symbol that can then be rendered to a
+	  framebuffer or printed as ASCII art. Useful for displaying
+	  links, serial numbers, or recovery URLs from the bootloader.
+
+	  Imported from https://github.com/nayuki/QR-Code-generator
+
+config LIB_QRCODE_MAX_VERSION
+	int "Maximum QR code version supported (1..40)"
+	depends on LIB_QRCODE
+	range 1 40
+	default 40
+	help
+	  Maximum QR code "version" the library is built to support, in
+	  the range 1..40. The version determines both the maximum payload
+	  capacity and the static scratch-buffer size demanded of callers:
+
+	    qrcodegen_BUFFER_LEN_FOR_VERSION(N) bytes per buffer,
+	    growing quadratically (N=20 -> ~370 B, N=30 -> ~810 B,
+	    N=40 -> ~1430 B per buffer; callers typically need two).
+
+	  Lower this if you only need to encode short payloads such as
+	  pairing tokens or short URLs and want to reclaim the static
+	  buffer footprint. The default of 40 matches upstream Nayuki.
+
+config LIB_QRCODE_GZIP
+	bool "Allow gzip pre-compression of QR code payloads"
+	depends on LIB_QRCODE
+	depends on GZIP_COMPRESSED
+	help
+	  When a payload does not fit in the configured maximum QR code
+	  version, transparently gzip-compress it and re-encode in binary
+	  mode with a four-byte magic header ("QRGZ"), so the scanner side
+	  knows to decompress.
+
+	  Useful for diagnostic / state-dump QR codes where the raw payload
+	  is highly compressible (printable text, log fragments) but would
+	  not otherwise fit a small QR symbol. The plain (uncompressed)
+	  encoder remains the first attempt; this just adds a fallback.
 
 choice
 	prompt "Pseudo-random library support type"
@@ -520,6 +577,25 @@ config TPM
 	  For size reasons only SHA1 is selected which is supported on TPM1.2.
 	  If you want a fully functional TPM enable all hashing algorithms.
 	  If you enabled measured boot all hashing algorithms are selected.
+
+config TPM_AUTOSTART
+	bool "Start the TPM during board initialisation"
+	depends on TPM
+	select EVENT
+	help
+	  Run the TPM startup and self-test sequence from an EVT_LAST_STAGE_INIT
+	  handler, which is the same thing the 'tpm autostart' command does.
+	  Without this the chip is still uninitialised when the OS takes over
+	  and the OS has to start it itself, which some kernels report as an
+	  error.
+
+	  Boards that share one binary between variants with and without a TPM
+	  fitted can enable this safely: when no TPM device is found the
+	  startup is skipped silently.
+
+	  Note that a full self-test can take a noticeable amount of time on
+	  a TPMv2, so this adds to the boot time of every boot, even when the
+	  TPM is not used afterwards.
 
 config SPL_TPM
 	bool "Trusted Platform Module (TPM) Support in SPL"
@@ -1314,7 +1390,7 @@ config SPL_LMB_ARCH_MEM_MAP
 config LMB_LIMIT_DMA_BELOW_RAM_TOP
 	bool
 	depends on LMB
-	default y if ARCH_BCM283X || ARCH_ROCKCHIP || STARFIVE_JH7110
+	default y if ARCH_BCM283X || ARCH_MVEBU || ARCH_ROCKCHIP || STARFIVE_JH7110
 	help
 	  Some architectures can not DMA above ram_top boundary,
 	  which is after 4 GiB or 32-bit boundary too. Limit the

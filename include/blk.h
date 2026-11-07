@@ -120,7 +120,7 @@ struct blk_desc {
  *
  * Return: - 1 if block returned from cache, 0 otherwise.
  */
-int blkcache_read(int iftype, int dev,
+int blkcache_read(int iftype, int dev, int hwpart,
 		  lbaint_t start, lbaint_t blkcnt,
 		  unsigned long blksz, void *buffer);
 
@@ -136,7 +136,7 @@ int blkcache_read(int iftype, int dev,
  * @param buffer - buffer containing data to cache
  *
  */
-void blkcache_fill(int iftype, int dev,
+void blkcache_fill(int iftype, int dev, int hwpart,
 		   lbaint_t start, lbaint_t blkcnt,
 		   unsigned long blksz, void const *buffer);
 
@@ -180,14 +180,14 @@ void blkcache_free(void);
 
 #else
 
-static inline int blkcache_read(int iftype, int dev,
+static inline int blkcache_read(int iftype, int dev, int hwpart,
 				lbaint_t start, lbaint_t blkcnt,
 				unsigned long blksz, void *buffer)
 {
 	return 0;
 }
 
-static inline void blkcache_fill(int iftype, int dev,
+static inline void blkcache_fill(int iftype, int dev, int hwpart,
 				 lbaint_t start, lbaint_t blkcnt,
 				 unsigned long blksz, void const *buffer) {}
 
@@ -529,7 +529,8 @@ static inline ulong blk_dread(struct blk_desc *block_dev, lbaint_t start,
 {
 	ulong blks_read;
 	if (blkcache_read(block_dev->uclass_id, block_dev->devnum,
-			  start, blkcnt, block_dev->blksz, buffer))
+			  block_dev->hwpart, start, blkcnt, block_dev->blksz,
+			  buffer))
 		return blkcnt;
 
 	/*
@@ -540,7 +541,8 @@ static inline ulong blk_dread(struct blk_desc *block_dev, lbaint_t start,
 	blks_read = block_dev->block_read(block_dev, start, blkcnt, buffer);
 	if (blks_read == blkcnt)
 		blkcache_fill(block_dev->uclass_id, block_dev->devnum,
-			      start, blkcnt, block_dev->blksz, buffer);
+			      block_dev->hwpart, start, blkcnt,
+			      block_dev->blksz, buffer);
 
 	return blks_read;
 }
@@ -738,6 +740,17 @@ int blk_select_hwpart_devnum(enum uclass_id uclass_id, int devnum, int hwpart);
  * Return: name of interface, or NULL if none
  */
 const char *blk_get_uclass_name(enum uclass_id uclass_id);
+
+/**
+ * blk_get_uclass_id() - Get the interface type for a name
+ *
+ * This does not look up or probe any device, so it can be used to validate
+ * an interface name before a device of that type exists.
+ *
+ * @uclass_idname: Interface name to check, e.g. "mmc"
+ * Return: interface type, or UCLASS_INVALID if the name is not known
+ */
+enum uclass_id blk_get_uclass_id(const char *uclass_idname);
 
 /**
  * blk_common_cmd() - handle common commands with block devices

@@ -2,14 +2,13 @@
 /*
  * AMD Versal Gen 2 SOC driver
  *
- * Copyright (C) 2022 - 2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022 - 2026, Advanced Micro Devices, Inc.
  */
 
 #include <dm.h>
 #include <soc.h>
-#include <zynqmp_firmware.h>
-#include <asm/io.h>
 #include <asm/arch/hardware.h>
+#include <asm/arch/sys_proto.h>
 
 #include <linux/bitfield.h>
 
@@ -27,17 +26,27 @@ struct soc_amd_versal2_priv {
 static int soc_amd_versal2_get_family(struct udevice *dev, char *buf, int size)
 {
 	struct soc_amd_versal2_priv *priv = dev_get_priv(dev);
+	int ret;
 
-	return snprintf(buf, size, "%s", priv->family);
+	ret = snprintf(buf, size, "%s", priv->family);
+	if (ret >= size)
+		return -ENOSPC;
+
+	return 0;
 }
 
 static int soc_amd_versal2_get_revision(struct udevice *dev, char *buf, int size)
 {
 	struct soc_amd_versal2_priv *priv = dev_get_priv(dev);
+	int ret;
 
-	return snprintf(buf, size, "v%d.%d",
-			(u32)FIELD_GET(PS_VERSION_MAJOR, priv->revision),
-			(u32)FIELD_GET(PS_VERSION_MINOR, priv->revision));
+	ret = snprintf(buf, size, "v%d.%d",
+		       (u32)FIELD_GET(PS_VERSION_MAJOR, priv->revision),
+		       (u32)FIELD_GET(PS_VERSION_MINOR, priv->revision));
+	if (ret >= size)
+		return -ENOSPC;
+
+	return 0;
 }
 
 static const struct soc_ops soc_amd_versal2_ops = {
@@ -48,23 +57,15 @@ static const struct soc_ops soc_amd_versal2_ops = {
 static int soc_amd_versal2_probe(struct udevice *dev)
 {
 	struct soc_amd_versal2_priv *priv = dev_get_priv(dev);
-	u32 ret_payload[PAYLOAD_ARG_CNT];
+	u32 version;
 	int ret;
 
+	ret = xilinx_pm_get_chipid(NULL, &version);
+	if (ret)
+		return ret;
+
 	priv->family = versal2_family;
-
-	if (IS_ENABLED(CONFIG_ZYNQMP_FIRMWARE)) {
-		ret = xilinx_pm_request(PM_GET_CHIPID, 0, 0, 0, 0,
-					0, 0, ret_payload);
-		if (ret)
-			return ret;
-	} else {
-		ret_payload[2] = readl(PMC_TAP_VERSION);
-		if (!ret_payload[2])
-			return -EINVAL;
-	}
-
-	priv->revision = FIELD_GET(PS_VERSION_MASK, ret_payload[2]);
+	priv->revision = FIELD_GET(PS_VERSION_MASK, version);
 
 	return 0;
 }

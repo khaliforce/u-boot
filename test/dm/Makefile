@@ -49,6 +49,24 @@ obj-$(CONFIG_ECDSA_VERIFY) += ecdsa.o
 obj-$(CONFIG_DM_HASH) += hash.o
 obj-$(CONFIG_EFI_MEDIA_SANDBOX) += efi_media.o
 obj-$(CONFIG_DM_ETH) += eth.o
+ifeq ($(CONFIG_NET_LWIP)$(CONFIG_PROT_UDP_LWIP),yy)
+obj-y += lwip.o
+endif
+ifeq ($(CONFIG_NET_LWIP)$(CONFIG_CMD_DHCP),yy)
+obj-y += lwip_dhcp.o
+obj-y += lwip_dhcp_options.o
+obj-y += lwip_dhcp_proxy.o
+obj-y += lwip_dhcp_policy.o
+endif
+ifeq ($(CONFIG_NET_LWIP)$(CONFIG_CMD_BOOTP),yy)
+obj-y += lwip_bootp.o
+endif
+ifeq ($(CONFIG_NET_LWIP)$(CONFIG_NETCONSOLE),yy)
+obj-y += netconsole.o
+endif
+ifeq ($(CONFIG_NET_LWIP)$(CONFIG_CMD_NFS),yy)
+obj-y += lwip_nfs.o
+endif
 obj-$(CONFIG_EXTCON) += extcon.o
 ifneq ($(CONFIG_EFI_PARTITION),)
 obj-$(CONFIG_FASTBOOT_FLASH_MMC) += fastboot.o
@@ -117,10 +135,10 @@ obj-$(CONFIG_DM_SERIAL) += serial.o
 obj-$(CONFIG_DM_SPI_FLASH) += sf.o
 obj-$(CONFIG_SIMPLE_BUS) += simple-bus.o
 obj-$(CONFIG_SIMPLE_PM_BUS) += simple-pm-bus.o
-obj-$(CONFIG_SMEM) += smem.o
 obj-$(CONFIG_SOC_DEVICE) += soc.o
 obj-$(CONFIG_SOUND) += sound.o
 obj-$(CONFIG_DM_SPI) += spi.o
+obj-$(CONFIG_SPI_EEPROM) += spi_eeprom.o
 obj-$(CONFIG_SPMI) += spmi.o
 obj-y += syscon.o
 obj-$(CONFIG_RESET_SYSCON) += syscon-reset.o

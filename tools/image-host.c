@@ -14,6 +14,7 @@
 #include <image.h>
 #include <hexdump.h>
 #include <version.h>
+#include <u-boot/ecdsa.h>
 
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -167,7 +168,8 @@ static int fit_image_write_sig(void *fit, int noffset, uint8_t *value,
 		}
 	}
 	if (algo_name && !ret)
-		ret = fdt_setprop_string(fit, noffset, "algo", algo_name);
+		ret = fdt_setprop_string(fit, noffset, FIT_ALGO_PROP,
+					 algo_name);
 
 	return ret;
 }
@@ -202,6 +204,7 @@ static int fit_image_setup_sig(struct image_sign_info *info,
 	info->checksum = image_get_checksum_algo(algo_name);
 	info->crypto = image_get_crypto_algo(algo_name);
 	info->padding = image_get_padding_algo(padding_name);
+	info->required_keynode = -1;
 	info->require_keys = require_keys;
 	info->engine_id = engine_id;
 	if (!info->checksum || !info->crypto) {
@@ -421,7 +424,9 @@ static int fit_image_setup_cipher(struct image_cipher_info *info,
 				  const char *image_name, int image_noffset,
 				  int noffset)
 {
+	const void *iv;
 	char *algo_name;
+	int ivlen;
 	int ret = -1;
 
 	if (fit_image_cipher_get_algo(fit, noffset, &algo_name)) {
@@ -443,10 +448,11 @@ static int fit_image_setup_cipher(struct image_cipher_info *info,
 	/*
 	 * Read the IV name
 	 *
-	 * If this property is not provided then mkimage will generate
-	 * a random IV and store it in the FIT image
+	 * If this property is not provided then mkimage will use the iv
+	 * property of the cipher node, if present, or generate a random
+	 * IV and store it in the FIT image
 	 */
-	info->ivname = fdt_getprop(fit, noffset, "iv-name-hint", NULL);
+	info->ivname = fdt_getprop(fit, noffset, FIT_IV_HINT, NULL);
 
 	info->fit = fit;
 	info->node_noffset = noffset;
@@ -479,6 +485,7 @@ static int fit_image_setup_cipher(struct image_cipher_info *info,
 		goto out;
 	}
 
+	iv = fdt_getprop(fit, noffset, FIT_IV_PROP, &ivlen);
 	if (info->ivname) {
 		/* Read the IV in the file */
 		ret = fit_image_read_key_iv_data(info->keydir, info->ivname,
@@ -486,6 +493,16 @@ static int fit_image_setup_cipher(struct image_cipher_info *info,
 						 info->cipher->iv_len);
 		if (ret < 0)
 			goto out;
+	} else if (iv) {
+		/* Use the explicit IV from the cipher node */
+		if (ivlen != info->cipher->iv_len) {
+			fprintf(stderr,
+				"Wrong iv length for cipher in image '%s' (expected %d bytes, got %d)\n",
+				image_name, info->cipher->iv_len, ivlen);
+			ret = -1;
+			goto out;
+		}
+		memcpy((void *)info->iv, iv, ivlen);
 	} else {
 		/* Generate an ramdom IV */
 		ret = get_random_data((void *)info->iv, info->cipher->iv_len);
@@ -514,7 +531,8 @@ int fit_image_write_cipher(void *fit, int image_noffset, int noffset,
 	}
 
 	/* add non ciphered data size */
-	ret = fdt_setprop_u32(fit, image_noffset, "data-size-unciphered", size);
+	ret = fdt_setprop_u32(fit, image_noffset,
+			      FIT_DATA_SIZE_UNCIPHERED_PROP, size);
 	if (ret == -FDT_ERR_NOSPACE) {
 		ret = -ENOSPC;
 		goto out;
@@ -608,7 +626,8 @@ int fit_image_cipher_data(const char *keydir, void *keydest,
 	 * image is already encrypted. This is important as 'mkimage -F' can be
 	 * run multiple times on a FIT image.
 	 */
-	if (fdt_getprop(fit, image_noffset, "data-size-unciphered", &len))
+	if (fdt_getprop(fit, image_noffset,
+			FIT_DATA_SIZE_UNCIPHERED_PROP, &len))
 		return 0;
 	if (len != -FDT_ERR_NOTFOUND) {
 		fprintf(stderr, "Failure testing for data-size-unciphered\n");
@@ -1162,27 +1181,6 @@ static int strlist_add(struct strlist *list, const char *str)
 	return 0;
 }
 
-static const char *fit_config_get_image_list(const void *fit, int noffset,
-					     int *lenp, int *allow_missingp)
-{
-	static const char default_list[] = FIT_KERNEL_PROP "\0"
-			FIT_FDT_PROP "\0" FIT_SCRIPT_PROP;
-	const char *prop;
-
-	/* If there is an "sign-image" property, use that */
-	prop = fdt_getprop(fit, noffset, "sign-images", lenp);
-	if (prop) {
-		*allow_missingp = 0;
-		return *lenp ? prop : NULL;
-	}
-
-	/* Default image list */
-	*allow_missingp = 1;
-	*lenp = sizeof(default_list);
-
-	return default_list;
-}
-
 /**
  * fit_config_add_node() - Add a node's path to a list of nodes to hash
  *
@@ -1314,8 +1312,10 @@ static int fit_config_add_hash(const void *fit, int image_noffset,
 /**
  * fit_config_get_hash_list() - Get the regions to sign
  *
- * This calculates a list of nodes to hash for this particular configuration,
- * returning it as a string list (struct strlist, not a devicetree string list)
+ * This calculates a list of nodes to hash for this particular configuration by
+ * walking the same image-reference properties as target-side verification.
+ * The result is returned as a string list (struct strlist, not a devicetree
+ * string list).
  *
  * @fit:	Pointer to the FIT format image header
  * @conf_noffset: Offset of configuration node to sign (child of
@@ -1328,15 +1328,19 @@ static int fit_config_add_hash(const void *fit, int image_noffset,
 static int fit_config_get_hash_list(const void *fit, int conf_noffset,
 				    int sig_offset, struct strlist *node_inc)
 {
-	int allow_missing;
-	const char *prop, *iname, *end;
 	const char *conf_name, *sig_name;
+	int prop_offset;
 	char name[200];
 	int image_count;
-	int ret, len;
+	int ret;
 
 	conf_name = fit_get_name(fit, conf_noffset, NULL);
 	sig_name = fit_get_name(fit, sig_offset, NULL);
+
+	if (fdt_getprop(fit, sig_offset, FIT_SIGN_IMAGES_PROP, NULL))
+		fprintf(stderr,
+			"Warning: configuration '%s/%s': 'sign-images' is ignored; all referenced images will be signed\n",
+			conf_name, sig_name);
 
 	/*
 	 * Build a list of nodes we need to hash. We always need the root
@@ -1348,34 +1352,35 @@ static int fit_config_get_hash_list(const void *fit, int conf_noffset,
 	    strlist_add(node_inc, name))
 		goto err_mem;
 
-	/* Get a list of images that we intend to sign */
-	prop = fit_config_get_image_list(fit, sig_offset, &len,
-					&allow_missing);
-	if (!prop)
-		return 0;
-
-	/* Locate the images */
-	end = prop + len;
+	/* Process each image referenced by the config */
 	image_count = 0;
-	for (iname = prop; iname < end; iname += strlen(iname) + 1) {
-		int image_noffset;
-		int index, max_index;
+	fdt_for_each_property_offset(prop_offset, fit, conf_noffset) {
+		const char *prop_name;
+		int img_count, i;
 
-		max_index = fdt_stringlist_count(fit, conf_noffset, iname);
+		fdt_getprop_by_offset(fit, prop_offset, &prop_name, NULL);
+		if (!prop_name)
+			continue;
 
-		for (index = 0; index < max_index; index++) {
-			image_noffset = fit_conf_get_prop_node_index(fit, conf_noffset,
-								     iname, index);
+		if (!fit_config_prop_is_image_ref(prop_name))
+			continue;
 
-			if (image_noffset < 0) {
-				fprintf(stderr,
-					"Failed to find image '%s' in  configuration '%s/%s'\n",
-					iname, conf_name, sig_name);
-				if (allow_missing)
-					continue;
+		img_count = fdt_stringlist_count(fit, conf_noffset, prop_name);
+		for (i = 0; i < img_count; i++) {
+			const char *iname;
+			int image_noffset;
 
-				return -ENOENT;
-			}
+			iname = fdt_stringlist_get(fit, conf_noffset, prop_name,
+						   i, NULL);
+			if (!iname)
+				continue;
+
+			image_noffset = fit_conf_get_prop_node_index(fit,
+								     conf_noffset,
+								     prop_name,
+								     i);
+			if (image_noffset < 0)
+				continue;
 
 			ret = fit_config_add_hash(fit, image_noffset, node_inc,
 						  conf_name, sig_name, iname);
@@ -1694,13 +1699,74 @@ err_cert:
 	return ret;
 }
 
+static int fit_pre_load_data_key_rsa(const char *keydir, void *keydest,
+				     int pre_load_noffset, const void *key_name)
+{
+	unsigned char *pubkey = NULL;
+	int ret, pubkey_len;
+
+	/* Read public key */
+	ret = read_pub_key(keydir, key_name, &pubkey, &pubkey_len);
+	if (ret < 0)
+		goto out;
+
+	/* Add the public key to the device tree */
+	ret = fdt_setprop(keydest, pre_load_noffset, "public-key",
+			  pubkey, pubkey_len);
+	if (ret)
+		fprintf(stderr, "Can't set public-key in node %s (ret = %d)\n",
+			IMAGE_PRE_LOAD_PATH, ret);
+ out:
+	return ret;
+}
+
+static int fit_pre_load_data_key_ecdsa(const char *keydir, void *keydest,
+				       int pre_load_noffset, const void *key_name,
+				       const void *algo_name)
+{
+	struct image_sign_info info;
+	int node, ret = 0;
+
+	memset(&info, 0, sizeof(info));
+	info.keydir = keydir;
+	info.keyname = strdup(key_name);
+	info.name = strdup(algo_name);
+	info.checksum = image_get_checksum_algo(algo_name);
+	if (!info.checksum) {
+		fprintf(stderr, "Can't find valid checksum from %s\n",
+			(char *)algo_name);
+		ret = -EINVAL;
+		goto out;
+	}
+	info.crypto = image_get_crypto_algo(algo_name);
+	if (!info.crypto) {
+		fprintf(stderr, "Can't find valid crypto from %s\n",
+			(char *)algo_name);
+		ret = -EINVAL;
+		goto out;
+	}
+	info.required_keynode = pre_load_noffset;
+
+	node = ecdsa_add_verify_data(&info, keydest);
+	if (node < 0) {
+		fprintf(stderr, "Can't add verify data: err = %d\n", node);
+		ret = -EIO;
+	}
+
+ out:
+	free((void *)info.keyname);
+	free((void *)info.name);
+
+	return ret;
+}
+
 int fit_pre_load_data(const char *keydir, void *keydest, void *fit)
 {
 	int pre_load_noffset;
 	const void *algo_name;
 	const void *key_name;
-	unsigned char *pubkey = NULL;
-	int ret, pubkey_len;
+	char *name;
+	int ret;
 
 	if (!keydir || !keydest || !fit)
 		return 0;
@@ -1727,17 +1793,25 @@ int fit_pre_load_data(const char *keydir, void *keydest, void *fit)
 		goto out;
 	}
 
-	/* Read public key */
-	ret = read_pub_key(keydir, key_name, &pubkey, &pubkey_len);
-	if (ret < 0)
+	/* Is it a RSA or an ECDSA key */
+	name = strchr((const char *)algo_name, ',');
+	if (!name) {
+		fprintf(stderr, "The name of the algo is invalid: %s\n",
+			(char *)algo_name);
+		ret = -EINVAL;
 		goto out;
+	}
+	name += 1;
 
-	/* Add the public key to the device tree */
-	ret = fdt_setprop(keydest, pre_load_noffset, "public-key",
-			  pubkey, pubkey_len);
-	if (ret)
-		fprintf(stderr, "Can't set public-key in node %s (ret = %d)\n",
-			IMAGE_PRE_LOAD_PATH, ret);
+	if (!strncmp(name, "rsa", 3)) {
+		ret = fit_pre_load_data_key_rsa(keydir, keydest, pre_load_noffset, key_name);
+	} else if (!strncmp(name, "ecdsa", 5)) {
+		ret = fit_pre_load_data_key_ecdsa(keydir, keydest, pre_load_noffset,
+						  key_name, algo_name);
+	} else {
+		fprintf(stderr, "The algo %s is not supported\n", (char *)algo_name);
+		ret = -EINVAL;
+	}
 
  out:
 	return ret;

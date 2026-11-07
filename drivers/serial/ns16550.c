@@ -492,14 +492,6 @@ static int ns16550_serial_assign_base(struct ns16550_plat *plat,
 	return 0;
 }
 
-#if CONFIG_IS_ENABLED(OF_CONTROL)
-enum {
-	PORT_NS16550 = 0,
-	PORT_JZ4780,
-	PORT_DW_APB,
-};
-#endif
-
 int ns16550_serial_probe(struct udevice *dev)
 {
 	struct ns16550_plat *plat = dev_get_plat(dev);
@@ -524,27 +516,27 @@ int ns16550_serial_probe(struct udevice *dev)
 	if (!ret)
 		reset_deassert_bulk(&reset_bulk);
 
-#if CONFIG_IS_ENABLED(OF_REAL)
-	if (CONFIG_IS_ENABLED(CLK) &&
-	    dev_get_driver_data(dev) == PORT_DW_APB) {
+	if (IS_ENABLED(CONFIG_NS16550_CLK_ENABLE) &&
+	    CONFIG_IS_ENABLED(CLK)) {
 		struct clk_bulk clk_bulk;
 
 		ret = clk_get_bulk(dev, &clk_bulk);
-		if (!ret) {
-			ret = clk_enable_bulk(&clk_bulk);
-			if (ret)
-				return ret;
-		} else if (ret != -ENOENT && ret != -ENOSYS) {
-			return ret;
-		}
+		if (!ret)
+			clk_enable_bulk(&clk_bulk);
 	}
-#endif
 
 	com_port->plat = dev_get_plat(dev);
 	ns16550_init(com_port, -1);
 
 	return 0;
 }
+
+#if CONFIG_IS_ENABLED(OF_CONTROL)
+enum {
+	PORT_NS16550 = 0,
+	PORT_JZ4780,
+};
+#endif
 
 #if CONFIG_IS_ENABLED(OF_REAL)
 int ns16550_serial_of_to_plat(struct udevice *dev)
@@ -615,7 +607,7 @@ static const struct udevice_id ns16550_serial_ids[] = {
 	{ .compatible = "ns16550a",		.data = PORT_NS16550 },
 	{ .compatible = "ingenic,jz4780-uart",	.data = PORT_JZ4780  },
 	{ .compatible = "nvidia,tegra20-uart",	.data = PORT_NS16550 },
-	{ .compatible = "snps,dw-apb-uart",	.data = PORT_DW_APB },
+	{ .compatible = "snps,dw-apb-uart",	.data = PORT_NS16550 },
 	{ .compatible = "intel,xscale-uart",	.data = PORT_NS16550 },
 	{}
 };

@@ -31,6 +31,7 @@ Implementation
 
    directories
    bloblist
+   imagemap
    bootstd/index
    ci_testing
    commands
@@ -53,6 +54,7 @@ Implementation
    printf
    smbios
    spl
+   splash
    falcon
    uefi/index
    vbe

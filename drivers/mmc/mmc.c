@@ -27,6 +27,7 @@
 #include <linux/list.h>
 #include <linux/printk.h>
 #include <div64.h>
+#include <tee/optee.h>
 #include "mmc_private.h"
 
 #define DEFAULT_CMD6_TIMEOUT_MS  500
@@ -1007,7 +1008,8 @@ static int mmc_set_card_speed(struct mmc *mmc, enum bus_mode mode,
 		return err;
 
 #if CONFIG_IS_ENABLED(MMC_HS200_SUPPORT) || \
-    CONFIG_IS_ENABLED(MMC_HS400_SUPPORT)
+	CONFIG_IS_ENABLED(MMC_HS400_SUPPORT) || \
+	CONFIG_IS_ENABLED(MMC_HS400_ES_SUPPORT)
 	/*
 	 * In case the eMMC is in HS200/HS400 mode and we are downgrading
 	 * to HS mode, the card clock are still running much faster than
@@ -2909,6 +2911,8 @@ static int mmc_power_on(struct mmc *mmc)
 
 static int mmc_power_off(struct mmc *mmc)
 {
+	unsigned int delay_us = mmc->cfg->power_off_delay_us;
+
 	mmc_set_clock(mmc, 0, MMC_CLK_DISABLE);
 #if CONFIG_IS_ENABLED(DM_MMC) && CONFIG_IS_ENABLED(DM_REGULATOR)
 	if (mmc->vmmc_supply) {
@@ -2931,6 +2935,9 @@ static int mmc_power_off(struct mmc *mmc)
 		}
 	}
 #endif
+	if (delay_us)
+		udelay(delay_us);
+
 	return 0;
 }
 
@@ -3168,6 +3175,9 @@ int mmc_init(struct mmc *mmc)
 				mmc->cfg->name);
 	}
 
+	if (CONFIG_IS_ENABLED(OPTEE) && mmc->capacity_rpmb > 0)
+		optee_rpmb_available();
+
 	return err;
 }
 
@@ -3203,6 +3213,9 @@ int mmc_deinit(struct mmc *mmc)
 
 		return sd_select_mode_and_width(mmc, caps_filtered);
 	} else {
+		if (CONFIG_IS_ENABLED(MMC_SKIP_EMMC_DEINIT))
+			return 0;
+
 		caps_filtered = mmc->card_caps &
 			~(MMC_CAP(MMC_HS_200) | MMC_CAP(MMC_HS_400) | MMC_CAP(MMC_HS_400_ES));
 

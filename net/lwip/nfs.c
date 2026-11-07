@@ -3,15 +3,16 @@
 
 #include <console.h>
 #include <display_options.h>
-#include <dm/device.h>
 #include <env.h>
 #include <image.h>
+#include <malloc.h>
+#include <net.h>
+#include <time.h>
+#include <dm/device.h>
 #include <linux/kconfig.h>
 #include <lwip/timeouts.h>
 #include <lwip/udp.h>
-#include <net.h>
 #include "../nfs-common.h"
-#include <time.h>
 
 static ulong timer_start;
 
@@ -98,10 +99,9 @@ static int nfs_timeout_check(void)
 	return 1;
 }
 
-static int nfs_loop(struct udevice *udev, ulong addr, char *fname,
+static int nfs_loop(struct net_lwip_ctx *net, ulong addr, char *fname,
 		    ip_addr_t srvip)
 {
-	struct netif *netif;
 	int ret;
 
 	nfs_download_state = NETLOOP_FAIL;
@@ -110,16 +110,12 @@ static int nfs_loop(struct udevice *udev, ulong addr, char *fname,
 	if (!fname || addr == 0)
 		return -1;
 
-	netif = net_lwip_new_netif(udev);
-	if (!netif)
-		return -1;
-
 	strlcpy(nfs_path_buff, fname, sizeof(nfs_path_buff));
 
 	nfs_filename = nfs_basename(nfs_path_buff);
 	nfs_path     = nfs_dirname(nfs_path_buff);
 
-	printf("Using %s device\n", udev->name);
+	printf("Using %s device\n", net->dev->name);
 
 	printf("File transfer via NFS from server %s; our IP address is %s\n",
 	       ipaddr_ntoa(&srvip), env_get("ipaddr"));
@@ -139,7 +135,6 @@ static int nfs_loop(struct udevice *udev, ulong addr, char *fname,
 
 	ret = nfs_udp_init(&sess_ctx);
 	if (ret < 0) {
-		net_lwip_remove_netif(netif);
 		debug("Failed to init network interface, aborting for error = %d\n", ret);
 		return ret;
 	}
@@ -152,7 +147,7 @@ static int nfs_loop(struct udevice *udev, ulong addr, char *fname,
 
 	timer_start = get_timer(0);
 	do {
-		net_lwip_rx(udev, netif);
+		net_lwip_poll();
 		if (net_state != NETLOOP_CONTINUE)
 			break;
 		if (ctrlc()) {
@@ -165,7 +160,8 @@ static int nfs_loop(struct udevice *udev, ulong addr, char *fname,
 	} while (true);
 	debug("%s: Loop exit at %lu\n", __func__, get_timer(0));
 
-	net_lwip_remove_netif(netif);
+	udp_remove(sess_ctx.pcb);
+	sess_ctx.pcb = NULL;
 
 	if (net_state == NETLOOP_SUCCESS) {
 		ret = 0;
@@ -186,23 +182,21 @@ static int nfs_loop(struct udevice *udev, ulong addr, char *fname,
 
 int do_nfs(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
 {
+	struct net_lwip_ctx net = {};
 	int ret = CMD_RET_SUCCESS;
-	bool started = false;
-	char *arg = NULL;
-	char *words[2] = { };
+	const char *arg = NULL;
+	char *arg_copy = NULL;
 	char *fname = NULL;
 	char *server_ip = NULL;
 	char *end;
 	ip_addr_t srvip;
 	ulong laddr;
 	ulong addr;
-	int i;
 
 	laddr = env_get_ulong("loadaddr", 16, image_load_addr);
 
 	switch (argc) {
 	case 1:
-		fname = env_get("bootfile");
 		break;
 	case 2:
 		/*
@@ -214,14 +208,16 @@ int do_nfs(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
 		addr = hextoul(argv[1], &end);
 		if (end == (argv[1] + strlen(argv[1]))) {
 			laddr = addr;
-			fname = env_get("bootfile");
 		} else {
-			arg = strdup(argv[1]);
+			arg = argv[1];
 		}
 		break;
 	case 3:
-		laddr = hextoul(argv[1], NULL);
-		arg = strdup(argv[2]);
+		if (strict_strtoul(argv[1], 16, &laddr)) {
+			ret = CMD_RET_USAGE;
+			goto out;
+		}
+		arg = argv[2];
 		break;
 	default:
 		ret = CMD_RET_USAGE;
@@ -229,32 +225,32 @@ int do_nfs(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
 	}
 
 	if (!arg)
-		arg = net_boot_file_name;
+		arg = *net_boot_file_name ? net_boot_file_name : env_get("bootfile");
 
-	if (*arg) {
-		/* Parse [ip:]fname */
-		i = 0;
-		while ((*(words + i) = strsep(&arg, ":")))
-			i++;
-
-		switch (i) {
-		case 2:
-			server_ip = words[0];
-			fname = words[1];
-			break;
-		case 1:
-			fname = words[0];
-			break;
-		default:
-			break;
+	if (arg && *arg) {
+		arg_copy = strdup(arg);
+		if (!arg_copy) {
+			ret = CMD_RET_FAILURE;
+			goto out;
+		}
+		/*
+		 * Split the optional IPv4 prefix once. Keep the allocation base
+		 * for cleanup, and do not modify argv, bootfile or the global name.
+		 */
+		fname = strchr(arg_copy, ':');
+		if (fname) {
+			*fname++ = '\0';
+			server_ip = arg_copy;
+		} else {
+			fname = arg_copy;
 		}
 	}
 
-	if (!server_ip)
+	if (!server_ip || !*server_ip)
 		server_ip = env_get("nfsserverip");
-	if (!server_ip)
+	if (!server_ip || !*server_ip)
 		server_ip = env_get("serverip");
-	if (!server_ip) {
+	if (!server_ip || !*server_ip) {
 		log_err("error: nfsserverip/serverip not set\n");
 		ret = CMD_RET_FAILURE;
 		goto out;
@@ -266,7 +262,7 @@ int do_nfs(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
 		goto out;
 	}
 
-	if (!fname) {
+	if (!fname || !*fname) {
 		log_err("error: no file name\n");
 		ret = CMD_RET_FAILURE;
 		goto out;
@@ -278,18 +274,15 @@ int do_nfs(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
 		goto out;
 	}
 
-	if (net_lwip_eth_start() < 0) {
+	if (net_lwip_start(&net, NET_LWIP_ADDR_ENV_STRICT)) {
 		ret = CMD_RET_FAILURE;
 		goto out;
 	}
-	started = true;
 
-	if (nfs_loop(eth_get_dev(), laddr, fname, srvip) < 0)
+	if (nfs_loop(&net, laddr, fname, srvip) < 0)
 		ret = CMD_RET_FAILURE;
 out:
-	if (started)
-		net_lwip_eth_stop();
-	if (arg != net_boot_file_name)
-		free(arg);
+	net_lwip_stop(&net);
+	free(arg_copy);
 	return ret;
 }

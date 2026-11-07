@@ -53,8 +53,22 @@ enum {
 	FASTBOOT_COMMAND_OEM_BOARD,
 	FASTBOOT_COMMAND_ACMD,
 	FASTBOOT_COMMAND_UCMD,
+	FASTBOOT_COMMAND_FLASHING_LOCK,
+	FASTBOOT_COMMAND_FLASHING_UNLOCK,
+	FASTBOOT_COMMAND_FLASHING_GET_UNLOCK_ABILITY,
 	FASTBOOT_COMMAND_COUNT
 };
+
+/**
+ * fastboot_flashing_is_unlocked() - read the AVB device lock state
+ *
+ * Available with CONFIG_FASTBOOT_CMD_FLASHING.
+ *
+ * @unlocked: set to the state on success
+ * @response: fastboot response buffer, filled on failure
+ * Return: 0 on success, -1 otherwise
+ */
+int fastboot_flashing_is_unlocked(bool *unlocked, char *response);
 
 /**
  * Reboot reasons
@@ -124,6 +138,16 @@ void fastboot_set_progress_callback(void (*progress)(const char *msg));
  * @buf_size: Size of download buffer, or zero for default
  */
 void fastboot_init(void *buf_addr, u32 buf_size);
+
+/**
+ * fastboot_usb_run() - run a USB fastboot session
+ *
+ * @controller_index: USB gadget controller index
+ * @buf_addr: Pointer to download buffer, or NULL for default
+ * @buf_size: Size of download buffer, or zero for default
+ * Return: 0 on success, or a negative error code
+ */
+int fastboot_usb_run(int controller_index, void *buf_addr, u32 buf_size);
 
 /**
  * fastboot_boot() - Execute fastboot boot command

@@ -75,6 +75,7 @@ enum uclass_id {
 	UCLASS_HASH,		/* Hash device */
 	UCLASS_HWSPINLOCK,	/* Hardware semaphores */
 	UCLASS_HOST,		/* Sandbox host device */
+	UCLASS_IMAGEMAP,	/* On-demand image loading from storage */
 	UCLASS_I2C,		/* I2C bus */
 	UCLASS_I2C_EEPROM,	/* I2C EEPROM device */
 	UCLASS_I2C_GENERIC,	/* Generic I2C device */
@@ -108,6 +109,7 @@ enum uclass_id {
 	UCLASS_PANEL,		/* Display panel, such as an LCD */
 	UCLASS_PANEL_BACKLIGHT,	/* Backlight controller for panel */
 	UCLASS_PARTITION,	/* Logical disk partition device */
+	UCLASS_9P,		/* 9P protocol transport */
 	UCLASS_PCH,		/* x86 platform controller hub */
 	UCLASS_PCI,		/* PCI bus */
 	UCLASS_PCI_EP,		/* PCI endpoint device */
@@ -134,10 +136,10 @@ enum uclass_id {
 	UCLASS_SCSI,		/* SCSI device */
 	UCLASS_SERIAL,		/* Serial UART */
 	UCLASS_SIMPLE_BUS,	/* Bus with child devices */
-	UCLASS_SMEM,		/* Shared memory interface */
 	UCLASS_SOC,		/* SOC Device */
 	UCLASS_SOUND,		/* Playing simple sounds */
 	UCLASS_SPI,		/* SPI bus */
+	UCLASS_SPI_EEPROM,	/* SPI EEPROM device */
 	UCLASS_SPI_FLASH,	/* SPI flash */
 	UCLASS_SPI_GENERIC,	/* Generic SPI flash target */
 	UCLASS_SPMI,		/* System Power Management Interface bus */

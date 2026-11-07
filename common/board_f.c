@@ -122,7 +122,7 @@ static int display_text_info(void)
 	return 0;
 }
 
-#ifdef CONFIG_SYSRESET
+#ifdef CONFIG_SYSRESET_PRINT_RESETINFO
 static int print_resetinfo(void)
 {
 	struct udevice *dev;
@@ -217,21 +217,34 @@ static int sizes_near(unsigned long long size1, unsigned long long size2)
 	return size1_scale == size2_scale && size1_val == size2_val;
 }
 
+static void show_dram_config_verbose(void)
+{
+	int i;
+
+#ifndef DEBUG
+	if (!CONFIG_IS_ENABLED(DISPLAY_DRAM_CONFIG_VERBOSE))
+		return;
+#endif
+
+	printf("RAM Configuration:\n");
+	for (i = 0; i < CONFIG_NR_DRAM_BANKS; i++) {
+		if (!gd->dram[i].size)
+			break;
+
+		printf("Bank #%d: 0x%llx - 0x%llx, ", i,
+		       (unsigned long long)(gd->dram[i].start),
+		       (unsigned long long)(gd->dram[i].start + gd->dram[i].size - 1));
+		print_size(gd->dram[i].size, "\n");
+	}
+}
+
 static int show_dram_config(void)
 {
 	unsigned long long size;
 	int i;
 
-	debug("\nRAM Configuration:\n");
-	for (i = size = 0; i < CONFIG_NR_DRAM_BANKS; i++) {
+	for (i = size = 0; i < CONFIG_NR_DRAM_BANKS; i++)
 		size += gd->dram[i].size;
-		debug("Bank #%d: %llx ", i,
-		      (unsigned long long)(gd->dram[i].start));
-#ifdef DEBUG
-		print_size(gd->dram[i].size, "\n");
-#endif
-	}
-	debug("\nDRAM:  ");
 
 	print_size(gd->ram_size, "");
 	if (!sizes_near(gd->ram_size, size)) {
@@ -240,6 +253,8 @@ static int show_dram_config(void)
 	}
 	board_add_ram_info(0);
 	putc('\n');
+
+	show_dram_config_verbose();
 
 	return 0;
 }
@@ -903,8 +918,10 @@ static int initf_upl(void)
 		return 0;
 
 	upl = malloc(sizeof(struct upl));
-	if (upl)
-		ret = upl_read_handoff(upl, oftree_default());
+	if (!upl)
+		return -ENOMEM;
+
+	ret = upl_read_handoff(upl, oftree_default());
 	if (ret) {
 		printf("UPL handoff: read failure (err=%dE)\n", ret);
 		return ret;
@@ -963,7 +980,7 @@ static void initcall_run_f(void)
 	INITCALL(display_options);	/* say that we are here */
 	INITCALL(display_text_info);	/* show debugging info if required */
 	INITCALL(checkcpu);
-#if CONFIG_IS_ENABLED(SYSRESET)
+#if CONFIG_IS_ENABLED(SYSRESET_PRINT_RESETINFO)
 	INITCALL(print_resetinfo);
 #endif
 	/* display cpu info (and speed) */

@@ -421,6 +421,19 @@ static inline u32 get_idx(u8 *list, u8 tgt, u32 size)
 	return idx;
 }
 
+/*
+ * The boot ROM of a few i.MX6 revisions runs the RNG self test
+ * incorrectly and leaves this event behind on every boot. Say so, so
+ * that the reader does not go looking for a fault that is not there.
+ */
+static bool is_rng_self_test_event(struct record *rec)
+{
+	return rec->contents[0] == HAB_WARNING &&
+	       rec->contents[1] == HAB_ENG_FAIL &&
+	       rec->contents[2] == HAB_CTX_ENTRY &&
+	       rec->contents[3] == HAB_ENG_CAAM;
+}
+
 static void process_event_record(uint8_t *event_data, size_t bytes)
 {
 	struct record *rec = (struct record *)event_data;
@@ -433,6 +446,9 @@ static void process_event_record(uint8_t *event_data, size_t bytes)
 	       ARRAY_SIZE(hab_contexts))]);
 	printf("%s", eng_str[get_idx(hab_engines, rec->contents[3],
 	       ARRAY_SIZE(hab_engines))]);
+
+	if (is_rng_self_test_event(rec))
+		puts("\nknown to come from the RNG self test of the boot ROM, harmless\n");
 }
 
 static void display_event(uint8_t *event_data, size_t bytes)
@@ -541,7 +557,19 @@ static int get_hab_status_m4(void)
 
 		record_len = get_record_len(rec);
 
+		if (!record_len ||
+		    offset + record_len > HAB_M4_PERSISTENT_BYTES) {
+			puts("\nERROR: Invalid HAB record length\n");
+			return 1;
+		}
+
 		if (rec->tag == HAB_TAG_EVT) {
+			if (record_len > sizeof(event_data)) {
+				printf("\nERROR: HAB event %d too large (%zu bytes)\n",
+				       index + 1, record_len);
+				return 1;
+			}
+
 			memcpy(&event_data, rec, record_len);
 			puts("\n");
 			printf("--------- HAB Event %d -----------------\n",

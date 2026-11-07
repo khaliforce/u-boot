@@ -83,6 +83,15 @@ config GATEWORKS_SC
 	  boards to provide a boot watchdog, power control, temperature monitor,
 	  voltage ADCs, and EEPROM.
 
+config GXP_EEPROM
+	bool "HPE GXP EEPROM driver"
+	depends on MISC
+	select NVMEM
+	help
+	  Enable access to the memory-mapped system information area
+	  on HPE GXP BMC SoCs. This region contains board data such as
+	  MAC addresses, serial number, and part number.
+
 config QCOM_GENI
 	bool "Qualcomm Generic Interface (GENI) driver"
 	depends on MISC
@@ -567,6 +576,21 @@ config I2C_EEPROM
 	help
 	  Enable a generic driver for EEPROMs attached via I2C.
 
+config SPI_EEPROM
+	bool "Enable driver for generic SPI-attached EEPROMs"
+	help
+	  Enable a generic driver for EEPROMs attached via SPI.
+
+	  This provides the UCLASS_SPI_EEPROM uclass together with a driver
+	  for AT25-style parts, i.e. devices described by the "atmel,at25"
+	  device tree binding. The chip geometry (size, pagesize and
+	  address-width) is read from the device tree, with per-compatible
+	  defaults for the parts listed in the driver. Parts using 8-, 16-
+	  and 24-bit addressing are supported; 9-bit addressing, where the
+	  ninth address bit travels in the opcode, is not.
+
+	  Only read access is implemented at present; spi_eeprom_write()
+	  returns -ENOSYS.
 
 config SPL_I2C_EEPROM
 	bool "Enable driver for generic I2C-attached EEPROMs for SPL"

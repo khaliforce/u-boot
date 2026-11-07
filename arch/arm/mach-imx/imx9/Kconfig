@@ -105,6 +105,18 @@ config TARGET_IMX93_11X11_EVK
 	select REGMAP
 	select SYSCON
 
+config TARGET_IMX93W_EVK
+	bool "imx93w_evk"
+	select OF_BOARD_FIXUP
+	select IMX93
+	imply OF_UPSTREAM
+	imply BOOTSTD_FULL
+	imply BOOTSTD_BOOTCOMMAND
+	select CMD_REMOTEPROC
+	select REMOTEPROC_IMX
+	select REGMAP
+	select SYSCON
+
 config TARGET_IMX93_FRDM
 	bool "imx93_frdm"
 	select OF_BOARD_FIXUP
@@ -149,6 +161,13 @@ config TARGET_PHYCORE_IMX93
 	select OF_BOARD_FIXUP
 	select OF_BOARD_SETUP
 
+config TARGET_IMX95_NAVQ
+	bool "imx95_navq"
+	select OF_BOARD_FIXUP
+	select IMX95
+	imply BOOTSTD_BOOTCOMMAND
+	imply BOOTSTD_FULL
+
 config TARGET_IMX95_19X19_EVK
 	bool "imx95_19x19_evk"
 	select OF_BOARD_FIXUP
@@ -166,7 +185,15 @@ config TARGET_IMX95_15X15_EVK
 	imply OF_UPSTREAM
 
 config TARGET_IMX95_15X15_FRDM
-	bool "imx95_frdm"
+	bool "imx95_15x15_frdm"
+	select OF_BOARD_FIXUP
+	select IMX95
+	imply BOOTSTD_FULL
+	imply BOOTSTD_BOOTCOMMAND
+	imply OF_UPSTREAM
+
+config TARGET_IMX95_19X19_FRDM_PRO
+	bool "imx95_19x19_frdm_pro"
 	select OF_BOARD_FIXUP
 	select IMX95
 	imply BOOTSTD_FULL
@@ -184,6 +211,7 @@ config TARGET_IMX943_EVK
 config TARGET_AQUILA_IMX95
 	bool "Support Toradex Aquila iMX95"
 	select IMX95
+	imply OF_UPSTREAM
 
 config TARGET_TORADEX_SMARC_IMX95
 	bool "Support Toradex SMARC iMX95"
@@ -193,6 +221,7 @@ config TARGET_TORADEX_SMARC_IMX95
 config TARGET_VERDIN_IMX95
 	bool "Support Toradex Verdin iMX95 module"
 	select IMX95
+	imply OF_UPSTREAM
 
 config TARGET_IMX952_EVK
 	bool "imx952_evk"
@@ -218,6 +247,7 @@ source "board/phytec/phycore_imx91_93/Kconfig"
 source "board/variscite/imx93_var_som/Kconfig"
 source "board/nxp/imx94_evk/Kconfig"
 source "board/nxp/imx95_evk/Kconfig"
+source "board/nxp/imx95_navq/Kconfig"
 source "board/nxp/imx95_frdm/Kconfig"
 source "board/toradex/aquila-imx95/Kconfig"
 source "board/toradex/smarc-imx95/Kconfig"

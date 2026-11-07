@@ -12,6 +12,7 @@
 #include <time.h>
 #include <vsprintf.h>
 #include <wait_bit.h>
+#include <linux/errno.h>
 #include <asm/armv8/mmu.h>
 #include <asm/cache.h>
 #include <asm/global_data.h>
@@ -22,6 +23,7 @@
 #include <asm/cache.h>
 #include <dm/platdata.h>
 #include <linux/bitfield.h>
+#include <linux/delay.h>
 #include <linux/string.h>
 #include "../../../board/xilinx/common/board.h"
 
@@ -88,10 +90,10 @@ void mem_map_fill(struct mm_region *bank_info, u32 num_banks)
 {
 	int banks = VERSAL2_MEM_MAP_USED;
 
-	for (int i = 0; i < num_banks; i++) {
-		if (banks > VERSAL2_MEM_MAP_MAX)
-			return;
+	if (num_banks > DRAM_BANKS)
+		num_banks = DRAM_BANKS;
 
+	for (int i = 0; i < num_banks; i++) {
 		versal2_mem_map[banks].virt = bank_info[i].phys;
 		versal2_mem_map[banks].phys = bank_info[i].phys;
 		versal2_mem_map[banks].size = bank_info[i].size;
@@ -99,6 +101,9 @@ void mem_map_fill(struct mm_region *bank_info, u32 num_banks)
 					      PTE_BLOCK_INNER_SHARE;
 		banks = banks + 1;
 	}
+
+	/* Last slot must stay zero - it terminates the mem_map list */
+	memset(&versal2_mem_map[banks], 0, sizeof(versal2_mem_map[banks]));
 }
 
 /**
@@ -290,13 +295,13 @@ bool soc_detection(void)
 {
 	u32 version, ps_version;
 
-	version = readl(PMC_TAP_VERSION);
+	version = zynqmp_pm_get_pmc_tap_version();
 	platform_id = FIELD_GET(PLATFORM_MASK, version);
 	ps_version = FIELD_GET(PS_VERSION_MASK, version);
 
 	debug("idcode %x, version %x, usercode %x\n",
-	      readl(PMC_TAP_IDCODE), version,
-	      readl(PMC_TAP_USERCODE));
+	      zynqmp_pm_get_pmc_tap_idcode(), version,
+	      zynqmp_pm_get_pmc_tap_usercode());
 
 	debug("pmc_ver %lx, ps version %x, rtl version %lx\n",
 	      FIELD_GET(PMC_VERSION_MASK, version),
@@ -310,6 +315,100 @@ bool soc_detection(void)
 
 	return true;
 }
+
+__weak int xilinx_pm_get_chipid(u32 *idcode, u32 *version)
+{
+	if (idcode)
+		*idcode = 0;
+
+	*version = readl(PMC_TAP_VERSION);
+	if (!*version)
+		return -EINVAL;
+
+	return 0;
+}
+
+__weak u32 zynqmp_pm_get_pmc_tap_idcode(void)
+{
+	return readl(PMC_TAP_IDCODE);
+}
+
+__weak u32 zynqmp_pm_get_pmc_tap_version(void)
+{
+	return readl(PMC_TAP_VERSION);
+}
+
+__weak u32 zynqmp_pm_get_pmc_tap_usercode(void)
+{
+	return readl(PMC_TAP_USERCODE);
+}
+
+__weak u32 zynqmp_pm_get_pmc_global_pggs_reg(u32 reg_addr)
+{
+	return readl((ulong)reg_addr);
+}
+
+__weak int zynqmp_pm_ospi_enable_linear_mode(bool enable)
+{
+	if (enable)
+		writel(readl(VERSAL_AXI_MUX_SEL) |
+		       VERSAL_OSPI_LINEAR_MODE, VERSAL_AXI_MUX_SEL);
+	else
+		writel(readl(VERSAL_AXI_MUX_SEL) &
+		       ~VERSAL_OSPI_LINEAR_MODE, VERSAL_AXI_MUX_SEL);
+
+	return 0;
+}
+
+#if !CONFIG_IS_ENABLED(DM_GPIO)
+int zynqmp_pm_ospi_flash_reset_raw(void)
+{
+	/* CRP WPROT */
+	writel(0, WPROT_CRP);
+	/* GPIO Reset */
+	writel(0, RST_GPIO);
+
+	/* disable IOU write protection */
+	writel(0, WPROT_LPD_MIO);
+
+	/* set direction as output */
+	writel((readl(BOOT_MODE_DIR) | BIT(FLASH_RESET_GPIO)),
+	       BOOT_MODE_DIR);
+
+	/* Data output enable */
+	writel((readl(BOOT_MODE_OUT) | BIT(FLASH_RESET_GPIO)),
+	       BOOT_MODE_OUT);
+
+	/* IOU SLCR write enable */
+	writel(0, WPROT_PMC_MIO);
+
+	/* set MIO as GPIO */
+	writel(0x60, MIO_PIN_12);
+
+	/* Set value 1 to pin */
+	writel((readl(BANK0_OUTPUT) | BIT(FLASH_RESET_GPIO)), BANK0_OUTPUT);
+	udelay(10);
+
+	/* Disable Tri-state */
+	writel((readl(BANK0_TRI) & ~BIT(FLASH_RESET_GPIO)), BANK0_TRI);
+	udelay(5);
+
+	/* Set value 0 to pin */
+	writel((readl(BANK0_OUTPUT) & ~BIT(FLASH_RESET_GPIO)), BANK0_OUTPUT);
+	udelay(150);
+
+	/* Set value 1 to pin */
+	writel((readl(BANK0_OUTPUT) | BIT(FLASH_RESET_GPIO)), BANK0_OUTPUT);
+	udelay(1200);
+
+	return 0;
+}
+
+__weak int zynqmp_pm_ospi_flash_reset(void)
+{
+	return zynqmp_pm_ospi_flash_reset_raw();
+}
+#endif
 
 U_BOOT_DRVINFO(soc_amd_versal2) = {
 	.name = "soc_amd_versal2",

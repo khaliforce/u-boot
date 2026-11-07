@@ -596,10 +596,6 @@ static int gmac_rockchip_probe(struct udevice *dev)
 	ulong rate;
 	int ret;
 
-	ret = clk_set_defaults(dev, CLK_DEFAULTS_PRE);
-	if (ret)
-		debug("%s clk_set_defaults failed %d\n", __func__, ret);
-
 	ret = clk_get_by_index(dev, 0, &clk);
 	if (ret)
 		return ret;
@@ -790,6 +786,9 @@ U_BOOT_DRIVER(eth_gmac_rockchip) = {
 	.id	= UCLASS_ETH,
 	.of_match = rockchip_gmac_ids,
 	.of_to_plat = gmac_rockchip_of_to_plat,
+#if IS_ENABLED(CONFIG_DM_MDIO)
+	.bind		= dw_dm_mdio_bind,
+#endif
 	.probe	= gmac_rockchip_probe,
 	.ops	= &gmac_rockchip_eth_ops,
 	.priv_auto	= sizeof(struct dw_eth_dev),

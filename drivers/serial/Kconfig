@@ -537,6 +537,7 @@ config DEBUG_UART_BASE
 	default 0xe0000000 if DEBUG_UART_ZYNQ && ARCH_ZYNQ
 	default 0xff000000 if DEBUG_UART_PL011 && ARCH_VERSAL
 	default 0xf1920000 if DEBUG_UART_PL011 && (ARCH_VERSAL_NET || ARCH_VERSAL2)
+	default 0xfe07a000 if DEBUG_UART_MESON && MESON_S4
 	help
 	  This is the base address of your UART for memory-mapped UARTs.
 
@@ -573,6 +574,7 @@ config DEBUG_UART_CLOCK
 	default 100000000 if DEBUG_UART_ZYNQ && ARCH_ZYNQMP
 	default 50000000 if DEBUG_UART_ZYNQ && ARCH_ZYNQ
 	default 100000000 if DEBUG_UART_PL011 && (ARCH_VERSAL || ARCH_VERSAL_NET || ARCH_VERSAL2)
+	default 24000000 if DEBUG_UART_MESON && MESON_S4
 	help
 	  The UART input clock determines the speed of the internal UART
 	  circuitry. The baud rate is derived from this by dividing the input
@@ -820,6 +822,13 @@ config SYS_NS16550
 	  CFG_SYS_NS16550_CLK defined in a legacy board header file will
 	  be used. It can be a constant or a function to get clock, eg,
 	  get_serial_clock().
+
+config NS16550_CLK_ENABLE
+	bool "Enable NS16550 clocks during probe"
+	depends on SYS_NS16550 && DM_SERIAL && CLK
+	help
+	  Enable all UART clocks before register access.
+	  Select this when firmware does not enable the UART clock gates.
 
 config NS16550_DYNAMIC
 	bool "Allow NS16550 to be configured at runtime"

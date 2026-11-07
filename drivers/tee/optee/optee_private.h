@@ -9,6 +9,38 @@
 #include <tee.h>
 #include <log.h>
 
+/*
+ * PTA_CMD_GET_DEVICES - List services without supplicant dependencies
+ *
+ * [out]    memref[0]: List of the UUIDs of service enumerated by OP-TEE
+ */
+#define PTA_CMD_GET_DEVICES		0x0
+
+/*
+ * PTA_CMD_GET_DEVICES_SUPP - List services depending on tee supplicant
+ *
+ * [out]    memref[0]: List of the UUIDs of service enumerated by OP-TEE
+ */
+#define PTA_CMD_GET_DEVICES_SUPP	0x1
+
+/*
+ * PTA_CMD_GET_DEVICES_RPMB - List services only depending on RPMB support
+ *
+ * [out]    memref[0]: List of the UUIDs of service enumerated by OP-TEE
+ */
+#define PTA_CMD_GET_DEVICES_RPMB	0x2
+
+#ifdef CONFIG_SUPPORT_UFS_RPMB
+/**
+ * struct optee_private - OP-TEE driver private data
+ * @rpmb_next_region:	next UFS RPMB region to report on PROBE_NEXT
+ * @rpmb_cur_region:	UFS RPMB region selected by the last PROBE_NEXT
+ */
+struct optee_private {
+	unsigned int rpmb_next_region;
+	unsigned int rpmb_cur_region;
+};
+#else
 /**
  * struct optee_private - OP-TEE driver private data
  * @rpmb_mmc:		mmc device for the RPMB partition
@@ -22,11 +54,15 @@ struct optee_private {
 	int rpmb_dev_id;
 	int rpmb_original_part;
 };
+#endif
 
 struct optee_msg_arg;
 
 void optee_suppl_cmd(struct udevice *dev, struct tee_shm *shm_arg,
 		     void **page_list);
+int optee_open_enum_session(struct udevice *dev, u32 *tee_sess);
+int optee_bind_services(struct udevice *dev, u32 tee_sess,
+			unsigned int pta_cmd);
 
 #ifdef CONFIG_SUPPORT_EMMC_RPMB
 /**
@@ -57,6 +93,35 @@ static inline void optee_suppl_cmd_rpmb(struct udevice *dev,
 
 static inline void optee_suppl_rpmb_release(struct udevice *dev)
 {
+}
+#endif
+
+#ifdef CONFIG_SUPPORT_UFS_RPMB
+void optee_suppl_cmd_rpmb_probe_reset(struct udevice *dev,
+				      struct optee_msg_arg *arg);
+
+void optee_suppl_cmd_rpmb_probe_next(struct udevice *dev,
+				     struct optee_msg_arg *arg);
+
+void optee_suppl_cmd_rpmb_frames(struct udevice *dev,
+				 struct optee_msg_arg *arg);
+#else
+static inline void optee_suppl_cmd_rpmb_probe_reset(struct udevice *dev,
+						    struct optee_msg_arg *arg)
+{
+	arg->ret = TEE_ERROR_NOT_IMPLEMENTED;
+}
+
+static inline void optee_suppl_cmd_rpmb_probe_next(struct udevice *dev,
+						   struct optee_msg_arg *arg)
+{
+	arg->ret = TEE_ERROR_NOT_IMPLEMENTED;
+}
+
+static inline void optee_suppl_cmd_rpmb_frames(struct udevice *dev,
+					       struct optee_msg_arg *arg)
+{
+	arg->ret = TEE_ERROR_NOT_IMPLEMENTED;
 }
 #endif
 

@@ -491,7 +491,7 @@ u-boot-spl-keep-syms-lto_c := \
 
 quiet_cmd_keep_syms_lto = KSL     $@
       cmd_keep_syms_lto = \
-	$(srctree)/scripts/gen_ll_addressable_symbols.sh $(NM) $^ > $@
+	$(srctree)/scripts/gen_ll_addressable_symbols.sh $(NM) --defined-only $^ > $@
 
 quiet_cmd_keep_syms_lto_cc = KSLCC   $@
       cmd_keep_syms_lto_cc = \
@@ -513,7 +513,8 @@ quiet_cmd_u-boot-spl ?= LTO     $@
 	(									\
 		cd $(obj) &&							\
 		touch $(patsubst $(obj)/%,%,$(u-boot-spl-main)) &&		\
-		$(CC) -nostdlib -nostartfiles $(LTO_FINAL_LDFLAGS) $(c_flags)	\
+		$(CC) -nostdlib -nostartfiles -static				\
+		$(LTO_FINAL_LDFLAGS) $(c_flags)					\
 		$(KBUILD_LDFLAGS:%=-Wl,%) $(LDFLAGS_$(@F):%=-Wl,%)		\
 		$(patsubst $(obj)/%,%,$(u-boot-spl-init))			\
 		-Wl,--whole-archive						\

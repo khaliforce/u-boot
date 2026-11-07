@@ -7,11 +7,15 @@
 #include <blk.h>
 #include <cpu_func.h>
 #include <image.h>
+#include <mapmem.h>
 #include <malloc.h>
+#include <mmc.h>
 #include <part.h>
 #include <tee.h>
 #include <tee/optee_ta_avb.h>
+#include <u-boot/sha256.h>
 
+#if CONFIG_IS_ENABLED(AVB_ROOT_KEY_BUILTIN)
 static const unsigned char avb_root_pub[1032] = {
 	0x0, 0x0, 0x10, 0x0, 0x55, 0xd9, 0x4, 0xad, 0xd8, 0x4,
 	0xaf, 0xe3, 0xd3, 0x84, 0x6c, 0x7e, 0xd, 0x89, 0x3d, 0xc2,
@@ -118,6 +122,7 @@ static const unsigned char avb_root_pub[1032] = {
 	0xe1, 0x74, 0xa1, 0xa3, 0x99, 0xa0, 0x85, 0x9e, 0xf1, 0xac,
 	0xd8, 0x7e,
 };
+#endif /* AVB_ROOT_KEY_BUILTIN */
 
 const char *str_avb_io_error(AvbIOResult res)
 {
@@ -302,13 +307,13 @@ char *avb_set_enforce_verity(const char *cmdline)
 
 /**
  * ============================================================================
- * IO(mmc) auxiliary functions
+ * Block IO auxiliary functions
  * ============================================================================
  */
-static unsigned long mmc_read_and_flush(struct mmc_part *part,
-					lbaint_t start,
-					lbaint_t sectors,
-					void *buffer)
+static unsigned long avb_blk_read_and_flush(struct avb_blk_part *part,
+					    lbaint_t start,
+					    lbaint_t sectors,
+					    void *buffer)
 {
 	unsigned long blks;
 	void *tmp_buf;
@@ -340,10 +345,10 @@ static unsigned long mmc_read_and_flush(struct mmc_part *part,
 		tmp_buf = buffer;
 	}
 
-	blks = blk_dread(part->mmc_blk,
+	blks = blk_dread(part->blk,
 			 start, sectors, tmp_buf);
 	/* flush cache after read */
-	flush_cache((ulong)tmp_buf, sectors * part->info.blksz);
+	flush_cache(map_to_sysmem(tmp_buf), sectors * part->info.blksz);
 
 	if (unaligned)
 		memcpy(buffer, tmp_buf, sectors * part->info.blksz);
@@ -351,8 +356,8 @@ static unsigned long mmc_read_and_flush(struct mmc_part *part,
 	return blks;
 }
 
-static unsigned long mmc_write(struct mmc_part *part, lbaint_t start,
-			       lbaint_t sectors, void *buffer)
+static unsigned long avb_blk_write(struct avb_blk_part *part, lbaint_t start,
+				   lbaint_t sectors, void *buffer)
 {
 	void *tmp_buf;
 	size_t buf_size;
@@ -380,59 +385,82 @@ static unsigned long mmc_write(struct mmc_part *part, lbaint_t start,
 		tmp_buf = buffer;
 	}
 
-	return blk_dwrite(part->mmc_blk,
+	return blk_dwrite(part->blk,
 			  start, sectors, tmp_buf);
 }
 
-static struct mmc_part *get_partition(AvbOps *ops, const char *partition)
+static int avb_init_mmc(int dev_num)
 {
+	struct mmc *mmc;
 	int ret;
-	u8 dev_num;
-	int part_num = 0;
-	struct mmc_part *part;
-	struct blk_desc *mmc_blk;
 
-	part = malloc(sizeof(struct mmc_part));
+	mmc = find_mmc_device(dev_num);
+	if (!mmc) {
+		printf("%s: no MMC device at slot %x\n", __func__, dev_num);
+		return -ENODEV;
+	}
+
+	ret = mmc_init(mmc);
+	if (ret) {
+		printf("%s: MMC initialization failed, err = %d\n",
+		       __func__, ret);
+		return ret;
+	}
+
+	if (IS_MMC(mmc)) {
+		/* Select the user area, where the GPT and our images live */
+		ret = mmc_switch_part(mmc, 0);
+		if (ret) {
+			printf("%s: MMC part switch failed, err = %d\n",
+			       __func__, ret);
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
+static struct avb_blk_part *get_partition(AvbOps *ops, const char *partition)
+{
+	enum uclass_id uclass_id;
+	struct avb_blk_part *part;
+	struct blk_desc *blk;
+	int dev_num;
+	int ret;
+
+	part = malloc(sizeof(struct avb_blk_part));
 	if (!part)
 		return NULL;
 
 	dev_num = get_boot_device(ops);
-	part->mmc = find_mmc_device(dev_num);
-	if (!part->mmc) {
-		printf("%s: no MMC device at slot %x\n", __func__, dev_num);
+	uclass_id = get_boot_interface(ops);
+	if (uclass_id == UCLASS_INVALID || dev_num < 0) {
+		printf("%s: no storage interface, run 'avb init' first\n",
+		       __func__);
 		goto err;
 	}
 
-	ret = mmc_init(part->mmc);
-	if (ret) {
-		printf("%s: MMC initialization failed, err = %d\n",
-		       __func__, ret);
-		goto err;
-	}
-
-	if (IS_MMC(part->mmc)) {
-		ret = mmc_switch_part(part->mmc, part_num);
-		if (ret) {
-			printf("%s: MMC part switch failed, err = %d\n",
-			       __func__, ret);
+	if (uclass_id == UCLASS_MMC) {
+		ret = avb_init_mmc(dev_num);
+		if (ret)
 			goto err;
-		}
 	}
 
-	mmc_blk = mmc_get_blk_desc(part->mmc);
-	if (!mmc_blk) {
-		printf("%s: failed to obtain block descriptor\n", __func__);
+	blk = blk_get_devnum_by_uclass_id(uclass_id, dev_num);
+	if (!blk) {
+		/* Every bus but mmc must already be started when AVB runs */
+		printf("%s: no %s device %d, is the bus started?\n", __func__,
+		       blk_get_uclass_name(uclass_id), dev_num);
 		goto err;
 	}
 
-	ret = part_get_info_by_name(mmc_blk, partition, &part->info);
+	ret = part_get_info_by_name(blk, partition, &part->info);
 	if (ret < 0) {
 		printf("%s: can't find partition '%s'\n", __func__, partition);
 		goto err;
 	}
 
-	part->dev_num = dev_num;
-	part->mmc_blk = mmc_blk;
+	part->blk = blk;
 
 	return part;
 err:
@@ -440,22 +468,22 @@ err:
 	return NULL;
 }
 
-static AvbIOResult mmc_byte_io(AvbOps *ops,
-			       const char *partition,
-			       s64 offset,
-			       size_t num_bytes,
-			       void *buffer,
-			       size_t *out_num_read,
-			       enum mmc_io_type io_type)
+static AvbIOResult avb_blk_byte_io(AvbOps *ops,
+				   const char *partition,
+				   s64 offset,
+				   size_t num_bytes,
+				   void *buffer,
+				   size_t *out_num_read,
+				   enum avb_io_type io_type)
 {
 	ulong ret;
-	struct mmc_part *part;
+	struct avb_blk_part *part;
 	u64 start_offset, start_sector, sectors, residue;
 	u8 *tmp_buf;
 	size_t io_cnt = 0;
 	AvbIOResult io_ret = AVB_IO_RESULT_OK;
 
-	if (!partition || !buffer || io_type > IO_WRITE)
+	if (!partition || !buffer || io_type > AVB_IO_WRITE)
 		return AVB_IO_RESULT_ERROR_IO;
 
 	part = get_partition(ops, partition);
@@ -484,11 +512,11 @@ static AvbIOResult mmc_byte_io(AvbOps *ops,
 				residue = num_bytes;
 			}
 
-			if (io_type == IO_READ) {
-				ret = mmc_read_and_flush(part,
-							 part->info.start +
-							 start_sector,
-							 1, tmp_buf);
+			if (io_type == AVB_IO_READ) {
+				ret = avb_blk_read_and_flush(part,
+							     part->info.start +
+							     start_sector,
+							     1, tmp_buf);
 
 				if (ret != 1) {
 					printf("%s: read error (%ld, %lld)\n",
@@ -503,10 +531,10 @@ static AvbIOResult mmc_byte_io(AvbOps *ops,
 				tmp_buf += (start_offset % part->info.blksz);
 				memcpy(buffer, (void *)tmp_buf, residue);
 			} else {
-				ret = mmc_read_and_flush(part,
-							 part->info.start +
-							 start_sector,
-							 1, tmp_buf);
+				ret = avb_blk_read_and_flush(part,
+							     part->info.start +
+							     start_sector,
+							     1, tmp_buf);
 
 				if (ret != 1) {
 					printf("%s: read error (%ld, %lld)\n",
@@ -518,8 +546,8 @@ static AvbIOResult mmc_byte_io(AvbOps *ops,
 					start_offset % part->info.blksz,
 					buffer, residue);
 
-				ret = mmc_write(part, part->info.start +
-						start_sector, 1, tmp_buf);
+				ret = avb_blk_write(part, part->info.start +
+						    start_sector, 1, tmp_buf);
 				if (ret != 1) {
 					printf("%s: write error (%ld, %lld)\n",
 					       __func__, ret, start_sector);
@@ -536,16 +564,16 @@ static AvbIOResult mmc_byte_io(AvbOps *ops,
 		}
 
 		if (sectors) {
-			if (io_type == IO_READ) {
-				ret = mmc_read_and_flush(part,
-							 part->info.start +
-							 start_sector,
-							 sectors, buffer);
+			if (io_type == AVB_IO_READ) {
+				ret = avb_blk_read_and_flush(part,
+							     part->info.start +
+							     start_sector,
+							     sectors, buffer);
 			} else {
-				ret = mmc_write(part,
-						part->info.start +
-						start_sector,
-						sectors, buffer);
+				ret = avb_blk_write(part,
+						    part->info.start +
+						    start_sector,
+						    sectors, buffer);
 			}
 
 			if (!ret) {
@@ -562,7 +590,7 @@ static AvbIOResult mmc_byte_io(AvbOps *ops,
 	}
 
 	/* Set counter for read operation */
-	if (io_type == IO_READ && out_num_read)
+	if (io_type == AVB_IO_READ && out_num_read)
 		*out_num_read = io_cnt;
 
 out:
@@ -601,8 +629,8 @@ static AvbIOResult read_from_partition(AvbOps *ops,
 				       void *buffer,
 				       size_t *out_num_read)
 {
-	return mmc_byte_io(ops, partition_name, offset_from_partition,
-			   num_bytes, buffer, out_num_read, IO_READ);
+	return avb_blk_byte_io(ops, partition_name, offset_from_partition,
+			       num_bytes, buffer, out_num_read, AVB_IO_READ);
 }
 
 /**
@@ -628,8 +656,8 @@ static AvbIOResult write_to_partition(AvbOps *ops,
 				      size_t num_bytes,
 				      const void *buffer)
 {
-	return mmc_byte_io(ops, partition_name, offset_from_partition,
-			   num_bytes, (void *)buffer, NULL, IO_WRITE);
+	return avb_blk_byte_io(ops, partition_name, offset_from_partition,
+			       num_bytes, (void *)buffer, NULL, AVB_IO_WRITE);
 }
 
 /**
@@ -655,14 +683,26 @@ static AvbIOResult validate_vbmeta_public_key(AvbOps *ops,
 					      public_key_metadata_length,
 					      bool *out_key_is_trusted)
 {
+	u8 key_digest[SHA256_SUM_LEN];
+	u8 trusted_digest[SHA256_SUM_LEN];
+	AvbIOResult rc;
+
 	if (!public_key_length || !public_key_data || !out_key_is_trusted)
 		return AVB_IO_RESULT_ERROR_IO;
 
+	/* Default deny: only flip to trusted on a positive digest match. */
 	*out_key_is_trusted = false;
-	if (public_key_length != sizeof(avb_root_pub))
-		return AVB_IO_RESULT_ERROR_IO;
 
-	if (memcmp(avb_root_pub, public_key_data, public_key_length) == 0)
+	/* Digest of the key embedded in the (untrusted) vbmeta. */
+	sha256_csum_wd(public_key_data, public_key_length, key_digest,
+		       CHUNKSZ_SHA256);
+
+	/* Digest of the trusted root key from the configured source. */
+	rc = avb_read_root_key_digest(ops, trusted_digest);
+	if (rc != AVB_IO_RESULT_OK)
+		return rc;
+
+	if (avb_safe_memcmp(key_digest, trusted_digest, sizeof(key_digest)) == 0)
 		*out_key_is_trusted = true;
 
 	return AVB_IO_RESULT_OK;
@@ -869,7 +909,7 @@ static AvbIOResult get_unique_guid_for_partition(AvbOps *ops,
 						 char *guid_buf,
 						 size_t guid_buf_size)
 {
-	struct mmc_part *part;
+	struct avb_blk_part *part;
 	size_t uuid_size;
 
 	part = get_partition(ops, partition);
@@ -906,7 +946,7 @@ static AvbIOResult get_size_of_partition(AvbOps *ops,
 					 const char *partition,
 					 u64 *out_size_num_bytes)
 {
-	struct mmc_part *part;
+	struct avb_blk_part *part;
 
 	if (!out_size_num_bytes)
 		return AVB_IO_RESULT_ERROR_INSUFFICIENT_SPACE;
@@ -1041,12 +1081,164 @@ free_name:
 }
 #endif
 
+#ifdef CONFIG_OPTEE_TA_AVB
+/**
+ * avb_write_lock_state() - sets the device lock state in the AVB TA
+ *
+ * @ops: contains AvbOps handlers
+ * @locked: true to lock the device, false to unlock it
+ *
+ * Changing the lock state resets all rollback indexes in the TA.
+ *
+ * Return: AVB_IO_RESULT_OK or an AvbIOResult error
+ */
+AvbIOResult avb_write_lock_state(AvbOps *ops, bool locked)
+{
+	struct tee_param param = {
+		.attr = TEE_PARAM_ATTR_TYPE_VALUE_INPUT,
+		.u.value.a = locked,
+	};
+
+	return invoke_func(ops->user_data, TA_AVB_CMD_WRITE_LOCK_STATE, 1,
+			   &param);
+}
+#endif
+
+/**
+ * get_preloaded_partition() - hand libavb a partition the caller loaded
+ *
+ * Without this callback libavb reads every requested partition into its own
+ * buffer, hashes that copy and frees it, and the bootloader then reads the
+ * partition a second time to boot it: the verified bytes and the booted bytes
+ * are different reads of the storage device. Serving the caller's buffer makes
+ * libavb hash the memory that is booted afterwards.
+ *
+ * The boot image header may describe fewer bytes than the hash descriptor
+ * covers; the missing tail is then read into the same buffer, up to its
+ * capacity, before it is handed out.
+ */
+static AvbIOResult get_preloaded_partition(AvbOps *ops, const char *partition,
+					   size_t num_bytes, u8 **out_pointer,
+					   size_t *out_num_bytes_preloaded)
+{
+	struct AvbOpsData *ops_data = ops->user_data;
+	struct avb_preloaded *p = NULL;
+	size_t num_read = 0;
+	AvbIOResult rc;
+	int i;
+
+	*out_pointer = NULL;
+	*out_num_bytes_preloaded = 0;
+
+	for (i = 0; i < ops_data->num_preloaded; i++) {
+		if (!strcmp(ops_data->preloaded[i].name, partition)) {
+			p = &ops_data->preloaded[i];
+			break;
+		}
+	}
+	if (!p)
+		return AVB_IO_RESULT_OK; /* not preloaded, libavb reads it */
+
+	if (num_bytes > p->max_size) {
+		printf("%s: %s: %zu bytes to verify, buffer holds %zu\n",
+		       __func__, partition, num_bytes, p->max_size);
+		return AVB_IO_RESULT_ERROR_INSUFFICIENT_SPACE;
+	}
+
+	if (num_bytes > p->size) {
+		rc = read_from_partition(ops, partition, p->size,
+					 num_bytes - p->size,
+					 (u8 *)p->addr + p->size, &num_read);
+		if (rc != AVB_IO_RESULT_OK)
+			return rc;
+		if (num_read != num_bytes - p->size)
+			return AVB_IO_RESULT_ERROR_IO;
+		p->size = num_bytes;
+	}
+
+	*out_pointer = p->addr;
+	*out_num_bytes_preloaded = num_bytes;
+
+	return AVB_IO_RESULT_OK;
+}
+
+int avb_ops_add_preloaded(AvbOps *ops, const char *partition, void *addr,
+			  size_t size, size_t max_size)
+{
+	struct AvbOpsData *ops_data = ops->user_data;
+	struct avb_preloaded *p;
+
+	if (ops_data->num_preloaded >= AVB_MAX_PRELOADED)
+		return -ENOSPC;
+	if (strlen(partition) >= sizeof(p->name) || size > max_size)
+		return -EINVAL;
+
+	p = &ops_data->preloaded[ops_data->num_preloaded++];
+	strcpy(p->name, partition);
+	p->addr = addr;
+	p->size = size;
+	p->max_size = max_size;
+
+	return 0;
+}
+
+/**
+ * ============================================================================
+ * AVB root key digest providers (selected via CONFIG_AVB_ROOT_KEY_*)
+ * ============================================================================
+ */
+#if CONFIG_IS_ENABLED(AVB_ROOT_KEY_BUILTIN)
+AvbIOResult avb_read_root_key_digest(AvbOps *ops, uint8_t *digest)
+{
+	sha256_csum_wd(avb_root_pub, sizeof(avb_root_pub), digest,
+		       CHUNKSZ_SHA256);
+
+	return AVB_IO_RESULT_OK;
+}
+#elif CONFIG_IS_ENABLED(AVB_ROOT_KEY_TEE)
+/*
+ * Read the trusted root key digest from OP-TEE secure storage as a named
+ * persistent value, using the existing TA_AVB_CMD_READ_PERSIST_VALUE command
+ * (see OP-TEE ta/avb/entry.c). The digest must be provisioned into the TEE
+ * beforehand under CONFIG_AVB_ROOT_KEY_TEE_NAME; a missing value returns
+ * AVB_IO_RESULT_ERROR_NO_SUCH_VALUE and verification fails closed.
+ */
+AvbIOResult avb_read_root_key_digest(AvbOps *ops, uint8_t *digest)
+{
+	size_t num_read = 0;
+	AvbIOResult rc;
+
+	rc = read_persistent_value(ops, CONFIG_AVB_ROOT_KEY_TEE_NAME,
+				   SHA256_SUM_LEN, digest, &num_read);
+	if (rc != AVB_IO_RESULT_OK)
+		return rc;
+
+	if (num_read != SHA256_SUM_LEN)
+		return AVB_IO_RESULT_ERROR_INVALID_VALUE_SIZE;
+
+	return AVB_IO_RESULT_OK;
+}
+#else /* CONFIG_AVB_ROOT_KEY_BOARD */
+/*
+ * Weak, fail-closed default. A board/SoC selecting CONFIG_AVB_ROOT_KEY_BOARD
+ * must provide a strong avb_read_root_key_digest() (e.g. reading a hash fused
+ * into OTP/eFuse). If it does not, verification fails rather than silently
+ * trusting a wrong key.
+ */
+__weak AvbIOResult avb_read_root_key_digest(AvbOps *ops, uint8_t *digest)
+{
+	printf("%s: board root key provider not implemented\n", __func__);
+
+	return AVB_IO_RESULT_ERROR_NO_SUCH_VALUE;
+}
+#endif
+
 /**
  * ============================================================================
  * AVB2.0 AvbOps alloc/initialisation/free
  * ============================================================================
  */
-AvbOps *avb_ops_alloc(int boot_device)
+AvbOps *avb_ops_alloc(enum uclass_id uclass_id, int dev_num)
 {
 	struct AvbOpsData *ops_data;
 
@@ -1057,6 +1249,7 @@ AvbOps *avb_ops_alloc(int boot_device)
 	ops_data->ops.user_data = ops_data;
 
 	ops_data->ops.read_from_partition = read_from_partition;
+	ops_data->ops.get_preloaded_partition = get_preloaded_partition;
 	ops_data->ops.write_to_partition = write_to_partition;
 	ops_data->ops.validate_vbmeta_public_key = validate_vbmeta_public_key;
 	ops_data->ops.read_rollback_index = read_rollback_index;
@@ -1069,7 +1262,8 @@ AvbOps *avb_ops_alloc(int boot_device)
 	ops_data->ops.read_persistent_value = read_persistent_value;
 #endif
 	ops_data->ops.get_size_of_partition = get_size_of_partition;
-	ops_data->mmc_dev = boot_device;
+	ops_data->uclass_id = uclass_id;
+	ops_data->dev_num = dev_num;
 
 	return &ops_data->ops;
 }

@@ -253,7 +253,7 @@ class TestFunctional(unittest.TestCase):
         TestFunctional._MakeInputFile('bl31.elf',
             tools.read_file(cls.ElfTestFile('elf_sections')))
         TestFunctional.tee_elf_path = TestFunctional._MakeInputFile('tee.elf',
-            tools.read_file(cls.ElfTestFile('elf_sections')))
+            tools.read_file(cls.ElfTestFile('elf_sections_tee')))
 
         # Newer OP_TEE file in v1 binary format
         cls.make_tee_bin('tee.bin')
@@ -1805,7 +1805,15 @@ class TestFunctional(unittest.TestCase):
         """Test for creation of entry documentation"""
         with terminal.capture() as (stdout, stderr):
             control.WriteEntryDocs(control.GetEntryModules())
-        self.assertTrue(len(stdout.getvalue()) > 0)
+        out = stdout.getvalue()
+        self.assertTrue(len(out) > 0)
+
+        # The body of each docstring must come out dedented but otherwise
+        # intact. Check a heading which several etypes use, since truncating
+        # the indent by too much would silently eat the start of every line.
+        self.assertIn('\nProperties / Entry arguments:\n', out)
+        self.assertIn('\nEntry: atf-bl31: ARM Trusted Firmware (ATF) BL31 blob\n',
+                      out)
 
     def testEntryDocsMissing(self):
         """Test handling of missing entry documentation"""
@@ -5491,7 +5499,14 @@ fdt         fdtmap                Extract the devicetree blob from the fdtmap
         """Test for creation of bintool documentation"""
         with terminal.capture() as (stdout, stderr):
             control.write_bintool_docs(control.bintool.Bintool.get_tool_list())
-        self.assertTrue(len(stdout.getvalue()) > 0)
+        out = stdout.getvalue()
+        self.assertTrue(len(out) > 0)
+
+        # As in testEntryDocs(), check that the body is dedented but intact
+        self.assertIn('\nBintool: mkimage: Image generation for U-Boot\n', out)
+        self.assertIn(
+            '\nThis bintool supports running `mkimage` with some basic parameters as\n',
+            out)
 
     def testBintoolDocsMissing(self):
         """Test handling of missing bintool documentation"""
@@ -5910,11 +5925,61 @@ fdt         fdtmap                Extract the devicetree blob from the fdtmap
 
         image_fname = tools.get_output_filename('image.bin')
         is_signed = self._CheckPreload(image_fname, self.TestFile("dev.key"))
-
         self.assertEqual(PRE_LOAD_MAGIC, data[:len(PRE_LOAD_MAGIC)])
         self.assertEqual(PRE_LOAD_VERSION, data[4:4 + len(PRE_LOAD_VERSION)])
         self.assertEqual(PRE_LOAD_HDR_SIZE, data[8:8 + len(PRE_LOAD_HDR_SIZE)])
         self.assertEqual(is_signed, True)
+
+    def testPreLoadEcdsa(self):
+        """Test an image with a pre-load header using ecdsa key"""
+        entry_args = {
+            'pre-load-key-path': os.path.join(self._binman_dir, 'test'),
+        }
+        data = self._DoReadFileDtb(
+            'security/pre_load_ecdsa.dts', entry_args=entry_args,
+            extra_indirs=[os.path.join(self._binman_dir, 'test')])[0]
+
+        image_fname = tools.get_output_filename('image.bin')
+        is_signed = self._CheckPreload(image_fname,
+                                       self.TestFile('ecdsa521.pem'),
+                                       'sha256,ecdsa521')
+        self.assertEqual(PRE_LOAD_MAGIC, data[:len(PRE_LOAD_MAGIC)])
+        self.assertEqual(PRE_LOAD_VERSION, data[4:4 + len(PRE_LOAD_VERSION)])
+        self.assertEqual(PRE_LOAD_HDR_SIZE, data[8:8 + len(PRE_LOAD_HDR_SIZE)])
+        self.assertEqual(is_signed, True)
+
+    def testPreLoadEcdsaInvalidSha(self):
+        """Test an image with a pre-load ecdsa header with an invalid hash"""
+        entry_args = {
+            'pre-load-key-path': os.path.join(self._binman_dir, 'test'),
+        }
+        with self.assertRaises(ValueError) as exc:
+            self._DoReadFileDtb('security/pre_load_ecdsa_invalid_sha.dts',
+                                entry_args=entry_args)
+        self.assertIn("Node '/binman/pre-load': sha2560 is not supported",
+                      str(exc.exception))
+
+    def testPreLoadEcdsaInvalidAlgo(self):
+        """Test an image with a pre-load header with an invalid algo"""
+        entry_args = {
+            'pre-load-key-path': os.path.join(self._binman_dir, 'test'),
+        }
+        with self.assertRaises(ValueError) as exc:
+            data = self._DoReadFileDtb('security/pre_load_ecdsa_invalid_algo.dts',
+                                       entry_args=entry_args)
+        self.assertIn("Node '/binman/pre-load': ecdsa5210 is not supported",
+                      str(exc.exception))
+
+    def testPreLoadEcdsaInvalidKey(self):
+        """Test an image with a pre-load header with an invalid key size"""
+        entry_args = {
+            'pre-load-key-path': os.path.join(self._binman_dir, 'test'),
+        }
+        with self.assertRaises(ValueError) as exc:
+            data = self._DoReadFileDtb('security/pre_load_ecdsa_invalid_key.dts',
+                                       entry_args=entry_args)
+        self.assertIn("Node '/binman/pre-load': The key ecdsa521.pem doesn't have the expected size",
+                      str(exc.exception))
 
     def _CheckSafeUniqueNames(self, *images):
         """Check all entries of given images for unsafe unique names"""
@@ -8115,6 +8180,26 @@ fdt         fdtmap                Extract the devicetree blob from the fdtmap
                                         new=fake_cst_run_cmd):
             self._DoTestFile('vendor/nxp_imx8_csf.dts')
 
+    def testNxpImx8mCSTSrkIndex(self):
+        """Test that nxp,srk-index selects the SRK key used for signing"""
+        ivt_data = struct.pack('<I', 0x412000d1)
+        ivt_data += b'\x00' * 20
+        ivt_data += struct.pack('<I', 0)
+        ivt_data += b'\x00' * 36
+        self._MakeInputFile('imx8m-ivt.bin', ivt_data)
+        with terminal.capture() as (_, stderr):
+            self._DoTestFile('vendor/nxp_imx8_csf_srk_index.dts',
+                             force_missing_bintools='cst')
+        err = stderr.getvalue()
+        self.assertRegex(err, "Image 'image'.*missing bintools.*: cst")
+
+        cfg_fname = glob.glob(
+            tools.get_output_filename('nxp.csf-config-txt.*'))[0]
+        config = configparser.ConfigParser()
+        config.optionxform = str
+        config.read(cfg_fname)
+        self.assertEqual('2', config['Install SRK']['Source index'])
+
     def testNxpImx8mCSTBintool(self):
         """Test the cst bintool run() and fetch() methods"""
         cst = bintool.Bintool.create('cst')
@@ -8165,11 +8250,14 @@ fdt         fdtmap                Extract the devicetree blob from the fdtmap
         image_path = os.path.join(testdir, 'image.bin')
         with open(image_path, 'w') as f:
             pass
-        container_path = os.path.join(testdir, 'mx95b0-ahab-container.img')
-        with open(container_path, 'w') as f:
-            f.write(bytes([0x87]).decode('latin1') * 32768)
+        self._MakeInputFile('mx95b0-ahab-container.img', bytes([0x87] * 32768))
         with terminal.capture():
             self._DoTestFile('vendor/nxp_imx95.dts', output_dir=testdir)
+
+        fname = tools.get_output_filename('u-boot-container.cfgout')
+        with open(fname, 'r') as fd:
+            data = fd.read()
+            self.assertRegex(data, "append .*/mx95b0-ahab-container.img\n")
 
     def testFitSignSimple(self):
         """Test that image with FIT and signature nodes can be signed"""
@@ -8499,7 +8587,7 @@ fdt         fdtmap                Extract the devicetree blob from the fdtmap
             'Node \'/binman/fit\': multiple key paths found',
             str(e.exception))
 
-    def testFitSignNoSingatureNodes(self):
+    def testFitSignNoSignatureNodes(self):
         """Test that fit,sign doens't raise error if no signature nodes found"""
         if not elf.ELF_TOOLS:
             self.skipTest('Python elftools not available')
@@ -8630,6 +8718,18 @@ fdt         fdtmap                Extract the devicetree blob from the fdtmap
                       "Parent node is missing 'bootph-all' property")
         self.assertEqual(len(subnode4.props), 0,
                         "subnode shouldn't have any properties")
+
+    def testTemplatePhandleCopy(self):
+        """Test if phandles are copied properly when inserting template"""
+        _, _, _, fname = self._DoReadFileDtb('fdt/template_phandle_copy.dts')
+        dtb = fdt.Fdt(fname)
+        dtb.Scan()
+        parent = dtb.GetNode("/binman/section@0/section@1")
+        child = parent.FindNode("section@2")
+        parent_phandle = fdt_util.fdt32_to_cpu(child.props["parent"].value)
+        child_phandle = fdt_util.fdt32_to_cpu(parent.props["child"].value)
+        self.assertEqual(parent, dtb.LookupPhandle(parent_phandle))
+        self.assertEqual(child, dtb.LookupPhandle(child_phandle))
 
 if __name__ == "__main__":
     unittest.main()

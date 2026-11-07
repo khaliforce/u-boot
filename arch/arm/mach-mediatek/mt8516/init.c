@@ -16,8 +16,10 @@
 #include <asm/cache.h>
 #include <asm/global_data.h>
 #include <asm/sections.h>
+#include <dm/ofnode.h>
 #include <dm/uclass.h>
 #include <dt-bindings/clock/mt8516-clk.h>
+#include <linux/err.h>
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -41,10 +43,12 @@ static int mtk_pll_early_init(void)
 		[CLK_APMIXED_MMPLL] =     380000000,
 	};
 	struct udevice *dev;
+	ulong rate;
+	ofnode node;
 	int ret, i;
 
-	ret = uclass_get_device_by_driver(UCLASS_CLK,
-			DM_DRIVER_GET(mt8516_clk_apmixedsys), &dev);
+	node = ofnode_by_compatible(ofnode_null(), "mediatek,mt8516-apmixedsys");
+	ret = uclass_get_device_by_ofnode(UCLASS_CLK, node, &dev);
 	if (ret)
 		return ret;
 
@@ -52,9 +56,9 @@ static int mtk_pll_early_init(void)
 	for (i = 0; i < ARRAY_SIZE(pll_rates); i++) {
 		struct clk clk = { .id = i, .dev = dev };
 
-		ret = clk_set_rate(&clk, pll_rates[i]);
-		if (ret)
-			return ret;
+		rate = clk_set_rate(&clk, pll_rates[i]);
+		if (IS_ERR_VALUE(rate))
+			return rate;
 
 		ret = clk_enable(&clk);
 		if (ret)

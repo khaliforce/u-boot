@@ -30,6 +30,7 @@ config DM_MDIO
 
 config DM_MDIO_MUX
 	bool "Enable Driver Model for MDIO MUX devices"
+	select DM_EVENT
 	depends on DM_MDIO
 	help
 	  Enable driver model for MDIO MUX devices
@@ -275,6 +276,14 @@ config DWC_ETH_QOS_STARFIVE
 	  The Synopsys Designware Ethernet QOS IP block with specific
 	  configuration used in STARFIVE  JH7110 soc.
 
+config DWC_ETH_QOS_SPACEMIT
+	bool "Synopsys DWC Ethernet QOS device support for SpacemiT"
+	depends on DWC_ETH_QOS && TARGET_SPACEMIT_K3
+	select DM_ETH_PHY
+	help
+	  The Synopsys Designware Ethernet QOS (DWMAC 5.40a) IP block with
+	  SpacemiT K3 APMU PHY interface and RGMII delay configuration.
+
 config DWC_ETH_QOS_STM32
 	bool "Synopsys DWC Ethernet QOS device support for STM32"
 	depends on DWC_ETH_QOS && ARCH_STM32MP
@@ -366,7 +375,7 @@ config ETH_SANDBOX
 
 config ETH_SANDBOX_RAW
 	depends on SANDBOX
-	depends on NET_LEGACY
+	depends on NET
 	default y
 	bool "Sandbox: Bridge to Linux Raw Sockets"
 	help
@@ -861,6 +870,15 @@ config GMAC_ROCKCHIP
 	  This driver provides Rockchip SoCs network support based on the
 	  Synopsys Designware driver.
 
+config GXP_UMAC
+	bool "HPE GXP UMAC ethernet controller"
+	depends on ARCH_GXP
+	select PHYLIB
+	select MII
+	help
+	  This driver supports the UMAC ethernet controller found on
+	  HPE GXP BMC SoCs.
+
 config RENESAS_ETHER_SWITCH
 	bool "Renesas Ethernet Switch support"
 	depends on DM_ETH && (R8A779F0 || R8A78000)
@@ -1098,6 +1116,14 @@ config MDIO_MSCC_MIIM
 	help
 	  This driver supports MDIO interface found in Microsemi and Microchip
 	  network switches.
+
+config MDIO_PIC64HPSC
+	bool "PIC64-HPSC/HX MDIO interface support"
+	depends on DM_MDIO
+	select CLK
+	help
+	  This driver supports the MDIO interface found on the PIC64-HPSC/HX
+	  SoCs.
 
 config MDIO_MUX_MMIOREG
 	bool "MDIO MUX accessed as a MMIO register access"

@@ -21,7 +21,7 @@ static int simple_video_probe(struct udevice *dev)
 	int ret;
 	fdt_addr_t base;
 	fdt_size_t size;
-	u32 width, height, stride, rot;
+	u32 width, height, stride, rot = 0;
 	struct ofnode_phandle_args args;
 
 	ret = dev_read_phandle_with_args(dev, "memory-region", NULL, 0, 0, &args);
@@ -69,7 +69,7 @@ static int simple_video_probe(struct udevice *dev)
 
 	/* Optional - in most cases, auto-calculation works */
 	ret = ofnode_read_u32(node, "stride", &stride);
-	if (!ret || stride)
+	if (!ret && stride)
 		uc_priv->line_length = stride;
 
 	format = ofnode_read_string(node, "format");

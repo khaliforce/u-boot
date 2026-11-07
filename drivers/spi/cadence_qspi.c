@@ -39,6 +39,11 @@ __weak int cadence_qspi_apb_dma_read(struct cadence_spi_priv *priv,
 	return 0;
 }
 
+__weak int zynqmp_pm_ospi_init(void)
+{
+	return 0;
+}
+
 __weak int cadence_device_reset(struct udevice *dev)
 {
 	return 0;
@@ -234,10 +239,9 @@ static int cadence_spi_probe(struct udevice *bus)
 		debug("Cadence QSPI: DMA mode enabled\n");
 	}
 
-	if (IS_ENABLED(CONFIG_ZYNQMP_FIRMWARE))
-		xilinx_pm_request(PM_REQUEST_NODE, PM_DEV_OSPI,
-				  ZYNQMP_PM_CAPABILITY_ACCESS, ZYNQMP_PM_MAX_QOS,
-				  ZYNQMP_PM_REQUEST_ACK_NO, 0, 0, NULL);
+	ret = zynqmp_pm_ospi_init();
+	if (ret)
+		return ret;
 
 	if (priv->ref_clk_hz == 0) {
 		ret = clk_get_by_index(bus, 0, &clk);
@@ -410,8 +414,11 @@ static int cadence_spi_of_to_plat(struct udevice *bus)
 	struct cadence_spi_priv *priv = dev_get_priv(bus);
 	ofnode subnode;
 
-	plat->regbase = devfdt_get_addr_index_ptr(bus, 0);
-	plat->ahbbase = devfdt_get_addr_size_index_ptr(bus, 1, &plat->ahbsize);
+	plat->regbase = dev_read_addr_index_ptr(bus, 0);
+	plat->ahbbase = dev_read_addr_size_index_ptr(bus, 1, &plat->ahbsize);
+	if (!plat->regbase || !plat->ahbbase)
+		return -EINVAL;
+
 	plat->is_decoded_cs = dev_read_bool(bus, "cdns,is-decoded-cs");
 	plat->fifo_depth = dev_read_u32_default(bus, "cdns,fifo-depth", 128);
 	plat->fifo_width = dev_read_u32_default(bus, "cdns,fifo-width", 4);

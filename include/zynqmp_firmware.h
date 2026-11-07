@@ -412,6 +412,8 @@ enum pm_ioctl_id {
 	IOCTL_AIE_OPS = 33,
 	/* IOCTL to get default/current QoS */
 	IOCTL_GET_QOS = 34,
+	/* IOCTL for OSPI flash GPIO reset sequence */
+	IOCTL_OSPI_FLASH_RESET = 35,
 };
 
 enum pm_sd_config_type {
@@ -463,10 +465,21 @@ int zynqmp_pm_set_gem_config(u32 node, enum pm_gem_config_type config,
 int zynqmp_pm_is_function_supported(const u32 api_id, const u32 id);
 int zynqmp_mmio_read(const u32 address, u32 *value);
 int zynqmp_mmio_write(const u32 address, const u32 mask, const u32 value);
+int zynqmp_pm_reset_assert(const u32 reset,
+			   const enum zynqmp_pm_reset_action assert_flag);
 int zynqmp_pm_feature(const u32 api_id);
 u32 zynqmp_pm_get_bootmode_reg(void);
 u32 zynqmp_pm_get_pmc_multi_boot_reg(void);
-u32 zynqmp_pm_get_pmc_global_pggs_reg(u32 reg_addr);
+int zynqmp_pm_fpga_load(u64 address);
+
+enum zynqmp_pm_request_ack {
+	ZYNQMP_PM_REQUEST_ACK_NO = 1,
+	ZYNQMP_PM_REQUEST_ACK_BLOCKING = 2,
+	ZYNQMP_PM_REQUEST_ACK_NON_BLOCKING = 3,
+};
+
+int zynqmp_pm_request_node(const u32 node, const u32 capabilities, const u32 qos,
+			   const enum zynqmp_pm_request_ack ack);
 
 /* Type of Config Object */
 #define PM_CONFIG_OBJECT_TYPE_BASE	0x1U
@@ -484,12 +497,6 @@ u32 zynqmp_pm_get_pmc_global_pggs_reg(u32 reg_addr);
 #define PM_CONFIG_IPI_PSU_CORTEXA53_0_MASK	0x00000001
 #define PM_CONFIG_IPI_PSU_CORTEXR5_0_MASK	0x00000100
 #define PM_CONFIG_IPI_PSU_CORTEXR5_1_MASK	0x00000200
-
-enum zynqmp_pm_request_ack {
-	ZYNQMP_PM_REQUEST_ACK_NO = 1,
-	ZYNQMP_PM_REQUEST_ACK_BLOCKING = 2,
-	ZYNQMP_PM_REQUEST_ACK_NON_BLOCKING = 3,
-};
 
 /* Node capabilities */
 #define ZYNQMP_PM_CAPABILITY_ACCESS	0x1U
@@ -533,11 +540,15 @@ extern smc_call_handler_t __data smc_call_handler;
 
 #define PM_REGNODE_PMC_IOU_SLCR		0x30000002
 #define PM_REGNODE_EFUSE_CACHE		0x30000003
+#define PM_REGNODE_PMC_TAP		0x30000005
 #define PM_REG_PGGS3			0x30004003
 
 #define SRAM_CSR_OFFSET			0x104C
 #define TXRX_CFGRDY_OFFSET		0x1054
 #define UFS_CAL_1_OFFSET		0xBE8
+#define PMC_TAP_IDCODE_OFFSET		0x0
+#define PMC_TAP_VERSION_OFFSET		0x4
+#define PMC_TAP_USERCODE_OFFSET	0x8
 
 #define PMC_GLOBAL_PGGS3_REG_NODE	0x1824C005
 

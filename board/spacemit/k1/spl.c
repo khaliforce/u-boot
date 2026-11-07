@@ -13,6 +13,7 @@
 #include <dm/device.h>
 #include <dm/uclass.h>
 #include <i2c.h>
+#include <linux/bitfield.h>
 #include <linux/ctype.h>
 #include <linux/delay.h>
 #include <log.h>
@@ -21,6 +22,20 @@
 #include <spl.h>
 #include <tlv_eeprom.h>
 #include "tlv_codes.h"
+
+/* boot mode configs */
+#define BOOT_DEV_FLAG_REG	0xd4282d10
+#define BOOT_PIN_SEL_REG	0xd4282c20
+
+#define BOOT_STRAP_MODE_OFFSET	9
+#define BOOT_STRAP_MODE_MASK	3
+#define BOOT_STRAP_MODE_EMMC	0
+#define BOOT_STRAP_MODE_SPI	1
+#define BOOT_STRAP_MODE_NAND	2
+#define BOOT_STRAP_MODE_SD	3
+
+#define STORAGE_API_P_ADDR	0xc0838498
+#define SDCARD_API_ENTRY	0xffe0a548
 
 #define MUX_MODE4		4
 #define EDGE_NONE		BIT(6)
@@ -46,6 +61,17 @@ typedef void (*puts_func_t)(const char *s);
 typedef int (*ddr_init_func_t)(u64 ddr_base, u32 cs_num, u32 data_rate,
 			       puts_func_t puts);
 
+enum board_boot_mode {
+	BOOT_MODE_NONE = 0,
+	BOOT_MODE_USB = 0x55a,
+	BOOT_MODE_EMMC,
+	BOOT_MODE_NAND,
+	BOOT_MODE_SPI,
+	BOOT_MODE_SD,
+	BOOT_MODE_SHELL = 0x55f,
+	BOOT_MODE_BOOTSTRAP,
+};
+
 struct ddr_cfg {
 	u32     data_rate;
 	u32     cs_num;
@@ -57,6 +83,47 @@ binman_sym_declare(ulong, ddr_fw, image_pos);
 binman_sym_declare(ulong, ddr_fw, size);
 
 char product_name[I2C_BUF_SIZE] = "k1";
+
+static u32 read_boot_mode(void)
+{
+	void __iomem *boot_dev = (void __iomem *)BOOT_DEV_FLAG_REG;
+	void __iomem *boot_strap = (void __iomem *)BOOT_PIN_SEL_REG;
+	void __iomem *storage_api = (void __iomem *)STORAGE_API_P_ADDR;
+	u32 mode, sel;
+
+	mode = readl(storage_api);
+	if (mode == SDCARD_API_ENTRY)
+		return BOOT_MODE_SD;
+
+	mode = readl(boot_dev);
+	if (mode == BOOT_MODE_NONE || mode > BOOT_MODE_SD) {
+		sel = FIELD_GET(BOOT_STRAP_MODE_MASK << BOOT_STRAP_MODE_OFFSET,
+				readl(boot_strap));
+		switch (sel) {
+		case BOOT_STRAP_MODE_EMMC:
+			mode = BOOT_MODE_EMMC;
+			break;
+		case BOOT_STRAP_MODE_NAND:
+			mode = BOOT_MODE_NAND;
+			break;
+		case BOOT_STRAP_MODE_SPI:
+			mode = BOOT_MODE_SPI;
+			break;
+		case BOOT_STRAP_MODE_SD:
+		default:
+			mode = BOOT_MODE_SD;
+			break;
+		}
+	}
+	return mode;
+}
+
+static void write_boot_mode(u32 mode)
+{
+	void __iomem *boot_dev = (void __iomem *)BOOT_DEV_FLAG_REG;
+
+	writel(mode, boot_dev);
+}
 
 static void i2c_early_init(void)
 {
@@ -73,6 +140,15 @@ static void i2c_early_init(void)
 			break;
 	}
 }
+
+static const struct {
+	const char *eeprom_name;
+	const char *fit_name;
+} k1_board_map[] = {
+	{ "k1-x_MUSE-Pi-Pro",   "spacemit/k1-musepi-pro"    },
+	{ "k1-x_deb1",          "spacemit/k1-bananapi-f3"   },
+	{ "k1-x_milkv-jupiter", "spacemit/k1-milkv-jupiter" },
+};
 
 int read_product_name(char *name, int size)
 {
@@ -105,6 +181,27 @@ int read_product_name(char *name, int size)
 		tlv_entry = (struct tlvinfo_tlv *)p;
 	}
 	return -ENOENT;
+}
+
+static void fixup_product_name(void)
+{
+	char fdt_name[I2C_BUF_SIZE];
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(k1_board_map); i++) {
+		memset(fdt_name, 0, I2C_BUF_SIZE);
+		if (!strncmp(product_name, k1_board_map[i].eeprom_name,
+			     strlen(k1_board_map[i].eeprom_name))) {
+			snprintf(fdt_name, I2C_BUF_SIZE, "%s",
+				 k1_board_map[i].fit_name);
+			break;
+		}
+	}
+	if (fdt_name[0] == '\0') {
+		/* set default board name */
+		sprintf(fdt_name, CONFIG_DEFAULT_DEVICE_TREE);
+	}
+	memcpy(product_name, fdt_name, I2C_BUF_SIZE);
 }
 
 static void clk_early_init(void)
@@ -204,8 +301,16 @@ void pmic_init(void)
 	int ret;
 
 	ret = uclass_get_device(UCLASS_PMIC, 0, &pmic_dev);
-	if (ret)
-		panic("Fail to detect PMIC (%d)\n", ret);
+	if (ret) {
+		/*
+		 * Not every K1 board describes its PMIC to the SPL, and on some
+		 * the rails are already up when the SPL runs. Only boards whose
+		 * DDR bring-up depends on programming the bucks need one, so a
+		 * missing PMIC is not fatal here.
+		 */
+		log_info("No PMIC (%d), leaving rails as found\n", ret);
+		return;
+	}
 	set_vdd_core();
 	set_vdd_1v8();
 	set_vdd_mmc();
@@ -315,9 +420,15 @@ void nor_early_init(void)
 	struct udevice *dev;
 	int ret;
 
+	/*
+	 * A board that boots from eMMC or microSD may describe no SPI
+	 * controller at all; that is not fatal unless the SPL boots from SPI.
+	 */
 	ret = uclass_get_device(UCLASS_SPI, 0, &dev);
-	if (ret)
-		panic("Fail to detect spi controller.\n");
+	if (ret) {
+		log_info("No SPI controller (%d)\n", ret);
+		return;
+	}
 	udelay(10);
 	ret = uclass_get_device(UCLASS_SPI_FLASH, 0, &dev);
 	if (ret)
@@ -327,7 +438,11 @@ void nor_early_init(void)
 
 void board_init_f(ulong dummy)
 {
+	u32 mode;
 	int ret;
+
+	mode = read_boot_mode();
+	write_boot_mode(mode);
 
 	ret = spl_early_init();
 	if (ret)
@@ -346,6 +461,7 @@ void board_init_f(ulong dummy)
 		log_info("Fail to detect board:%d\n", ret);
 	else
 		log_info("Get board name:%s\n", product_name);
+	fixup_product_name();
 	pmic_init();
 
 	ddr_early_init();
@@ -354,7 +470,58 @@ void board_init_f(ulong dummy)
 
 u32 spl_boot_device(void)
 {
-	return BOOT_DEVICE_SPI;
+	u32 mode;
+	int ret;
+
+	mode = read_boot_mode();
+	switch (mode) {
+	case BOOT_MODE_EMMC:
+		ret = BOOT_DEVICE_MMC1;
+		break;
+	case BOOT_MODE_NAND:
+		ret = BOOT_DEVICE_NAND;
+		break;
+	case BOOT_MODE_SPI:
+		ret = BOOT_DEVICE_SPI;
+		break;
+	case BOOT_MODE_USB:
+		ret = BOOT_DEVICE_USB;
+		break;
+	case BOOT_MODE_SD:
+		ret = BOOT_DEVICE_MMC2;
+		break;
+	default:
+		ret = BOOT_DEVICE_MMC1;
+		break;
+	}
+
+	return ret;
+}
+
+/*
+ * Try the device the BootROM booted from first, then the other storage
+ * this SPL can read. The boot-mode detection relies on BootROM state; if
+ * it names a device that holds no image (the BootROM probed a card before
+ * falling back to eMMC, say), the SPL still finds U-Boot instead of
+ * stopping at "failed to boot from all boot devices".
+ */
+void board_boot_order(u32 *spl_boot_list)
+{
+	u32 fallbacks[3];
+	int i, n = 0, m = 0;
+
+	if (CONFIG_IS_ENABLED(MMC)) {
+		fallbacks[m++] = BOOT_DEVICE_MMC1;
+		fallbacks[m++] = BOOT_DEVICE_MMC2;
+	}
+	if (CONFIG_IS_ENABLED(SPI_LOAD))
+		fallbacks[m++] = BOOT_DEVICE_SPI;
+
+	spl_boot_list[n++] = spl_boot_device();
+	for (i = 0; i < m; i++)
+		if (fallbacks[i] != spl_boot_list[0])
+			spl_boot_list[n++] = fallbacks[i];
+	spl_boot_list[n] = BOOT_DEVICE_NONE;
 }
 
 void spl_board_init(void)
@@ -363,24 +530,7 @@ void spl_board_init(void)
 
 int board_fit_config_name_match(const char *name)
 {
-	char fdt_name[I2C_BUF_SIZE];
-	int i;
-
-	memset(fdt_name, 0, I2C_BUF_SIZE);
-	if (!strncmp(product_name, "k1-x_", 5)) {
-		snprintf(fdt_name, I2C_BUF_SIZE, "%s-%s", "k1",
-			 &product_name[5]);
-	}
-	if (fdt_name[0] == '\0') {
-		/* set default board name */
-		sprintf(fdt_name, "k1-musepi-pro");
-	}
-	for (i = 0; i < I2C_BUF_SIZE; i++) {
-		if (fdt_name[i] == '\0')
-			break;
-		fdt_name[i] = tolower(fdt_name[i]);
-	}
-	if (!strcmp(name, fdt_name))
+	if (!strcmp(name, product_name))
 		return 0;
 	return -ENOENT;
 }

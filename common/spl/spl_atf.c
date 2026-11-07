@@ -75,7 +75,7 @@ struct bl31_params *bl2_plat_get_bl31_params_default(ulong bl32_entry,
 	bl32_ep_info->args.arg3 = fdt_addr;
 	bl32_ep_info->pc = bl32_entry ? bl32_entry : 0;
 	bl32_ep_info->spsr = SPSR_64(MODE_EL1, MODE_SP_ELX,
-				     DISABLE_ALL_EXECPTIONS);
+				     DISABLE_ALL_EXCEPTIONS);
 
 	bl2_to_bl31_params->bl32_image_info = &bl31_params_mem.bl32_image_info;
 	SET_PARAM_HEAD(bl2_to_bl31_params->bl32_image_info,
@@ -91,7 +91,7 @@ struct bl31_params *bl2_plat_get_bl31_params_default(ulong bl32_entry,
 	bl33_ep_info->args.arg0 = 0xffff & read_mpidr();
 	bl33_ep_info->pc = bl33_entry;
 	bl33_ep_info->spsr = SPSR_64(MODE_EL2, MODE_SP_ELX,
-				     DISABLE_ALL_EXECPTIONS);
+				     DISABLE_ALL_EXCEPTIONS);
 
 	bl2_to_bl31_params->bl33_image_info = &bl31_params_mem.bl33_image_info;
 	SET_PARAM_HEAD(bl2_to_bl31_params->bl33_image_info,
@@ -149,7 +149,7 @@ struct bl_params *bl2_plat_get_bl31_params_v2_default(ulong bl32_entry,
 	bl_params_node->ep_info->args.arg3 = fdt_addr;
 	bl_params_node->ep_info->pc = bl32_entry ? bl32_entry : 0;
 	bl_params_node->ep_info->spsr = SPSR_64(MODE_EL1, MODE_SP_ELX,
-						DISABLE_ALL_EXECPTIONS);
+						DISABLE_ALL_EXCEPTIONS);
 	SET_PARAM_HEAD(bl_params_node->image_info, ATF_PARAM_IMAGE_BINARY,
 		       ATF_VERSION_2, 0);
 
@@ -166,7 +166,7 @@ struct bl_params *bl2_plat_get_bl31_params_v2_default(ulong bl32_entry,
 	bl_params_node->ep_info->args.arg0 = 0xffff & read_mpidr();
 	bl_params_node->ep_info->pc = bl33_entry;
 	bl_params_node->ep_info->spsr = SPSR_64(MODE_EL2, MODE_SP_ELX,
-						DISABLE_ALL_EXECPTIONS);
+						DISABLE_ALL_EXCEPTIONS);
 	SET_PARAM_HEAD(bl_params_node->image_info, ATF_PARAM_IMAGE_BINARY,
 		       ATF_VERSION_2, 0);
 
@@ -252,17 +252,20 @@ static int spl_fit_images_find(void *blob, int os)
 	return found;
 }
 
-ulong spl_fit_images_get_entry(void *blob, int node)
+void spl_fit_images_get_entry(void *blob, int node, ulong *entry)
 {
-	ulong  val;
 	int ret;
 
-	ret = fit_image_get_entry(blob, node, &val);
+	ret = fit_image_get_entry(blob, node, entry);
 	if (ret)
-		ret = fit_image_get_load(blob, node, &val);
+		ret = fit_image_get_load(blob, node, entry);
+	if (ret) {
+		debug("%s: no entry or load address, keeping 0x%lx\n",
+		      __func__, *entry);
+		return;
+	}
 
-	debug("%s: entry point 0x%lx\n", __func__, val);
-	return val;
+	debug("%s: entry point 0x%lx\n", __func__, *entry);
 }
 
 void __noreturn spl_invoke_atf(struct spl_image_info *spl_image)
@@ -280,7 +283,7 @@ void __noreturn spl_invoke_atf(struct spl_image_info *spl_image)
 	 */
 	node = spl_fit_images_find(blob, IH_OS_TEE);
 	if (node >= 0)
-		bl32_entry = spl_fit_images_get_entry(blob, node);
+		spl_fit_images_get_entry(blob, node, &bl32_entry);
 
 	/*
 	 * Find the U-Boot binary (in /fit-images) load addreess or
@@ -291,7 +294,7 @@ void __noreturn spl_invoke_atf(struct spl_image_info *spl_image)
 
 	node = spl_fit_images_find(blob, IH_OS_U_BOOT);
 	if (node >= 0)
-		bl33_entry = spl_fit_images_get_entry(blob, node);
+		spl_fit_images_get_entry(blob, node, &bl33_entry);
 
 	/*
 	 * If ATF_NO_PLATFORM_PARAM is set, we override the platform
