@@ -3,6 +3,22 @@
 
 #include "sunxi-u-boot.dtsi"
 
+/ {
+	hdmi-display@5500000 {
+		compatible = "allwinner,sun20i-d1-hdmi-display";
+		reg = <0x05500000 0x10000>,
+		      <0x02001000 0x1000>,
+		      <0x05000000 0x10000>,
+		      <0x05100000 0x100000>,
+		      <0x05460000 0x1000>,
+		      <0x05470000 0x1000>,
+		      <0x05510000 0x1000>;
+		reg-names = "hdmi", "ccu", "de-clocks", "mixer", "tcon-top",
+			    "tcon-tv", "phy";
+		bootph-all;
+	};
+};
+
 /* Linux uses a separate DT to initialize Wi-Fi. */
 &mmc1 {
 	status = "disabled";

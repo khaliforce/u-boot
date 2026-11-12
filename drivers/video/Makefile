@@ -26,7 +26,11 @@ obj-$(CONFIG_PANEL_STARTEK_KD070FHFID015) += panel-startek-kd070fhfid015.o
 obj-$(CONFIG_PANEL_STARTEK_KD070FHFID078) += panel-startek-kd070fhfid078.o
 obj-$(CONFIG_$(PHASE_)SIMPLE_PANEL) += simple_panel.o
 
+ifeq ($(CONFIG_MANGOPI_MQ_PRO),y)
+obj-$(CONFIG_VIDEO_LOGO) += mangopi_mq_pro_logo.bmp.o
+else
 obj-$(CONFIG_VIDEO_LOGO) += u_boot_logo.bmp.o
+endif
 obj-$(CONFIG_$(PHASE_)BMP) += bmp.o
 
 endif
