@@ -144,6 +144,20 @@ int ft_board_setup(void *blob, struct bd_info *bd)
 {
 	return fdt_fixup_memory(blob, gd->ram_base, gd->ram_size);
 }
+
+int board_late_init(void)
+{
+	struct udevice *dev;
+	int ret;
+
+	if (IS_ENABLED(CONFIG_VIDEO_SUN20I_D1)) {
+		ret = uclass_first_device_err(UCLASS_VIDEO, &dev);
+		if (ret)
+			printf("D1 HDMI: display unavailable (%d), continuing boot\n", ret);
+	}
+
+	return 0;
+}
 #endif
 
 int board_fit_config_name_match(const char *name)

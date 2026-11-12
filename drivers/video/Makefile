@@ -24,7 +24,11 @@ obj-$(CONFIG_$(PHASE_)PANEL) += panel-uclass.o
 obj-$(CONFIG_PANEL_HX8238D) += hx8238d.o
 obj-$(CONFIG_$(PHASE_)SIMPLE_PANEL) += simple_panel.o
 
+ifeq ($(CONFIG_MANGOPI_MQ_PRO),y)
+obj-$(CONFIG_VIDEO_LOGO) += mangopi_mq_pro_logo.bmp.o
+else
 obj-$(CONFIG_VIDEO_LOGO) += u_boot_logo.bmp.o
+endif
 obj-$(CONFIG_$(PHASE_)BMP) += bmp.o
 
 endif

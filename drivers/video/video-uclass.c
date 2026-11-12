@@ -14,6 +14,7 @@
 #include <malloc.h>
 #include <mapmem.h>
 #include <spl.h>
+#include <splash.h>
 #include <stdio_dev.h>
 #include <video.h>
 #include <video_console.h>
@@ -586,16 +587,24 @@ int video_get_ysize(struct udevice *dev)
 #define SPLASH_START(_name)	__splash_ ## _name ## _begin
 
 SPLASH_DECL(u_boot_logo);
+SPLASH_DECL(mangopi_mq_pro_logo);
 
 void *video_get_u_boot_logo(void)
 {
+	if (IS_ENABLED(CONFIG_MANGOPI_MQ_PRO))
+		return SPLASH_START(mangopi_mq_pro_logo);
+
 	return SPLASH_START(u_boot_logo);
 }
 
 static int show_splash(struct udevice *dev)
 {
-	u8 *data = SPLASH_START(u_boot_logo);
+	u8 *data = video_get_u_boot_logo();
 	int ret;
+
+	if (IS_ENABLED(CONFIG_MANGOPI_MQ_PRO))
+		return video_bmp_display(dev, map_to_sysmem(data),
+					 BMP_ALIGN_CENTER, BMP_ALIGN_CENTER, true);
 
 	ret = video_bmp_display(dev, map_to_sysmem(data), -4, 4, true);
 

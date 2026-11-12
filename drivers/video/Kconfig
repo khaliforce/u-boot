@@ -970,6 +970,16 @@ config VIDEO_DW_HDMI
 	  rather requires a SoC-specific glue driver to call it), it
 	  can not be enabled from the configuration menu.
 
+config VIDEO_SUN20I_D1
+	bool "Allwinner D1 HDMI boot display"
+	depends on TARGET_SUN20I_D1
+	select VIDEO_DW_HDMI
+	help
+	  Enable a fixed 1920x1080 HDMI display at 60 Hz on Allwinner D1.
+	  Show the configured boot logo before Linux starts.
+	  Keep the serial console available if HDMI setup fails.
+	  Stop display DMA before the operating system enables its IOMMU.
+
 config VIDEO_DSI_HOST_SANDBOX
 	bool "Enable sandbox for dsi host"
 	depends on SANDBOX
