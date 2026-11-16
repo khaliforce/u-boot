@@ -1,0 +1,105 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: '47 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'khaliforce/u-boot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Sync tags and default branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_REPOSITORY: ${{ github.repository }}
+          UPSTREAM_REPOSITORY: u-boot/u-boot
+          SYNC_BRANCH: main
+        run: |
+          python3 - <<'PYTHON'
+          # SPDX-License-Identifier: GPL-2.0-only
+          import json
+          import os
+          import subprocess
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+
+          def read_refs(repository, pattern):
+              output = subprocess.check_output(
+                  ["git", "ls-remote", "--refs", f"https://github.com/{repository}.git", pattern],
+                  text=True,
+                  timeout=60,
+              )
+              return {ref: sha for sha, ref in (line.split() for line in output.splitlines())}
+
+
+          def api(repository, endpoint, data=None):
+              request = urllib.request.Request(
+                  f"https://api.github.com/repos/{repository}/{endpoint}",
+                  data=json.dumps(data).encode() if data is not None else None,
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                      "Content-Type": "application/json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                      "User-Agent": "upstream-sync",
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  body = response.read()
+                  return response.status, json.loads(body) if body else None
+
+
+          def sync(upstream, target, branch):
+              source_tags = read_refs(upstream, "refs/tags/*")
+              target_tags = read_refs(target, "refs/tags/*")
+              source_branch = read_refs(upstream, f"refs/heads/{branch}")
+              head = source_branch[f"refs/heads/{branch}"]
+              added = 0
+              for ref in sorted(source_tags.keys() - target_tags.keys()):
+                  sha = source_tags[ref]
+                  try:
+                      api(target, "git/refs", {"ref": ref, "sha": sha})
+                  except urllib.error.HTTPError as error:
+                      if error.code != 422:
+                          raise
+                      encoded = urllib.parse.quote(ref.removeprefix("refs/"), safe="/")
+                      _, existing = api(target, f"git/ref/{encoded}")
+                      if existing["object"]["sha"] != sha:
+                          raise RuntimeError(f"Tag changed during sync: {ref}") from error
+                  else:
+                      added += 1
+                      print(f"Added {ref}: {sha}", flush=True)
+
+              status, _ = api(
+                  target,
+                  "merges",
+                  {"base": branch, "head": head, "commit_message": f"Merge {upstream} {branch}"},
+              )
+              branch_status = "already current" if status == 204 else "updated"
+              result = f"Tags added: {added}\nBranch `{branch}`: {branch_status} at upstream `{head}`\n"
+              print(result, flush=True)
+              return result
+
+
+          if __name__ == "__main__":
+              result = sync(
+                  os.environ["UPSTREAM_REPOSITORY"],
+                  os.environ["TARGET_REPOSITORY"],
+                  os.environ["SYNC_BRANCH"],
+              )
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+                  summary.write(result)
+          PYTHON
